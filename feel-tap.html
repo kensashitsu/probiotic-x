@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>タップで繋ぐ 実験</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;color:#eee;
+    touch-action:none;overscroll-behavior:none}
+  canvas{position:absolute;inset:0;width:100%;height:100dvh;display:block}
+  #hud{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:0;right:0;text-align:center;
+    pointer-events:none;z-index:5}
+  #hud .n{font-size:15px;color:#bfe9d2;letter-spacing:.04em}
+  #hud .n b{font-size:26px;color:#8ff0c0;font-weight:800}
+  #hud .best{font-size:12px;color:#7a8a86;margin-top:2px}
+  .btn{position:absolute;top:calc(env(safe-area-inset-top) + 12px);
+    font:inherit;font-size:12px;font-weight:700;color:#0b0f14;background:#8ff0c0;border:0;border-radius:999px;
+    padding:7px 14px;z-index:6}
+  #reset{right:12px}
+  #undo{left:12px;background:#5d7b74;color:#eaf7f2}
+  #tip{position:absolute;top:calc(env(safe-area-inset-top) + 74px);left:0;right:0;text-align:center;
+    font-size:12px;line-height:1.5;color:#6f7d84;padding:0 14px;z-index:5;pointer-events:none;transition:opacity .4s}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud"><div class="n">封じた <b id="cnt">0</b></div><div class="best" id="best"></div></div>
+<div id="tip">桿菌を順にタップして繋ぎ 腐敗菌を囲め／最初の1本をもう一度押すと閉じる</div>
+<button id="undo" class="btn">1本戻す</button>
+<button id="reset" class="btn">まき直す</button>
+
+<script>
+'use strict';
+// ============================================================
+//  案A「タップで繋ぐ」＝ なぞりを捨て、桿菌を順に選んで多角形を作る。
+//  指が触れるのは一瞬だけなので手の遮蔽がほぼ消える。
+//  運動精度の勝負 → どの菌を選べば囲めるかの空間判断の勝負に置き換える。
+// ============================================================
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
+let W,H,DPR;
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=cv.clientWidth; H=cv.clientHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  g.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',resize);
+
+const SCALE=1.25;
+const RLEN=15*SCALE, RW=6.2*SCALE;
+const FOE_R=13*SCALE;
+const TAP_R=42;                 // タップで菌を掴める距離（指の太さを見込んで広め）
+const BLOCK_PAD=FOE_R*0.35+RW;  // 線が腐敗菌にどれだけ寄ったら通せないか
+
+const REF_AREA=390*604, RODS_REF=40, FOES_REF=14;   // なぞらないので菌は少なめで足りる
+const PLAY_TOP=110;
+function playBot(){ return H-120; }
+function playArea(){ return W*Math.max(120, playBot()-PLAY_TOP); }
+function rodCount(){ return Math.max(14, Math.round(RODS_REF*playArea()/REF_AREA)); }
+function foeCount(){ return Math.max(5,  Math.round(FOES_REF*playArea()/REF_AREA)); }
+
+let rods=[], foes=[], bits=[], seals=[], flashes=[];
+let chain=[];                 // タップした順の桿菌
+let best=+(localStorage.getItem('tapBest')||0);
+let totalSealed=0, clock=0, shake=0;
+
+function rnd(a,b){return a+Math.random()*(b-a);}
+
+function scatter(){
+  rods=[];
+  const N=rodCount();
+  for(let i=0;i<N;i++)
+    rods.push({x:rnd(40,W-40), y:rnd(PLAY_TOP,playBot()), ang:Math.random()*Math.PI,
+               phase:Math.random()*6.28, joined:false, glow:0});
+  foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
+  chain=[]; bits=[]; seals=[]; flashes=[]; totalSealed=0; shake=0;
+  updateHud();
+}
+function spawnFoe(){
+  const spikes=[]; for(let i=0;i<9;i++) spikes.push(0.75+Math.random()*0.5);
+  foes.push({x:rnd(50,W-50), y:rnd(PLAY_TOP+12,playBot()-12), r:FOE_R*rnd(0.8,1.25),
+             phase:Math.random()*6.28, spin:rnd(-0.5,0.5), dead:false, dt:0, resist:0, block:0, spikes});
+}
+function updateHud(){ elCnt.textContent=totalSealed; elBest.textContent= best? 'これまで最多 '+best : ''; }
+function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
+
+// ---------- 幾何 ----------
+function segFoe(a,b,f){        // 線分と腐敗菌の最短距離
+  const dx=b.x-a.x, dy=b.y-a.y, L=dx*dx+dy*dy;
+  let t=L? ((f.x-a.x)*dx+(f.y-a.y)*dy)/L : 0;
+  t=Math.max(0,Math.min(1,t));
+  return Math.hypot(f.x-(a.x+dx*t), f.y-(a.y+dy*t));
+}
+function blockedBy(a,b){       // その線を通せない腐敗菌を返す
+  for(const f of foes){ if(f.dead) continue;
+    if(segFoe(a,b,f) < f.r+BLOCK_PAD) return f; }
+  return null;
+}
+function pointInPoly(px,py,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x,yi=poly[i].y, xj=poly[j].x,yj=poly[j].y;
+    if(((yi>py)!==(yj>py)) && (px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+function polyArea(poly){
+  let s=0; for(let i=0,j=poly.length-1;i<poly.length;j=i++){ s+=(poly[j].x+poly[i].x)*(poly[j].y-poly[i].y); }
+  return Math.abs(s/2);
+}
+
+// ---------- 入力：押している間はプレビュー、離して確定 ----------
+let pointer=null;             // {x,y} 押している位置
+function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function nearestFree(x,y){
+  let best=null, bd=TAP_R;
+  for(const r of rods){ if(r.joined) continue;
+    const d=Math.hypot(r.x-x,r.y-y); if(d<bd){ bd=d; best=r; } }
+  return best;
+}
+// 押している位置から見た「今なにが起きるか」
+function preview(){
+  if(!pointer) return null;
+  // 鎖が3本以上あって最初の1本を押していれば「閉じる」
+  if(chain.length>=3){
+    const f0=chain[0];
+    if(Math.hypot(f0.x-pointer.x, f0.y-pointer.y)<=TAP_R){
+      const blk=blockedBy(chain[chain.length-1], f0);
+      return {kind:'close', target:f0, blocked:blk};
+    }
+  }
+  const r=nearestFree(pointer.x,pointer.y);
+  if(!r) return null;
+  if(chain.length===0) return {kind:'first', target:r, blocked:null};
+  const blk=blockedBy(chain[chain.length-1], r);
+  return {kind:'add', target:r, blocked:blk};
+}
+function commit(){
+  const pv=preview(); pointer=null;
+  if(!pv) return;
+  if(pv.blocked){                     // 腐敗菌が筋にいる＝通せない
+    pv.blocked.block=1;
+    shake=Math.max(shake,4); blockSnd();
+    tipMsg('その筋に腐敗菌がいる！ 別の菌を選べ');
+    return;
+  }
+  if(pv.kind==='close'){ closeChain(); return; }
+  pv.target.joined=true; pv.target.glow=1; chain.push(pv.target);
+  pop(chain.length);
+}
+function closeChain(){
+  const poly=chain.map(r=>({x:r.x,y:r.y}));
+  if(polyArea(poly)<1400){ tipMsg('輪が小さすぎる'); return; }
+  const cap=chain.length;             // ★繋いだ本数＝一度に溶かせる匹数（feel-sealと同じ）
+  const inside=foes.filter(f=>!f.dead && pointInPoly(f.x,f.y,poly));
+  let gx=0,gy=0; for(const p of poly){gx+=p.x;gy+=p.y;} gx/=poly.length; gy/=poly.length;
+  inside.sort((a,b)=>Math.hypot(a.x-gx,a.y-gy)-Math.hypot(b.x-gx,b.y-gy));
+  const melt=inside.slice(0,cap), left=inside.slice(cap);
+  let sealed=0;
+  for(const f of melt){ f.dead=true; f.dt=0; sealed++;
+    for(let i=0;i<10;i++) bits.push({x:f.x,y:f.y,vx:rnd(-1.2,1.2),vy:rnd(-1.6,0.4),life:1,r:rnd(1.5,3.5)}); }
+  for(const f of left) f.resist=1;
+  seals.push({poly, life:1, partial:left.length>0});
+  if(sealed>0){
+    totalSealed+=sealed;
+    if(totalSealed>best){ best=totalSealed; localStorage.setItem('tapBest',best); }
+    fizz(sealed,cap);
+    for(let i=0;i<sealed;i++) setTimeout(spawnFoe, 500+i*120);
+  } else fizz(0,cap);
+  if(left.length>0){ resistSnd(left.length); tipMsg('酸が足りない！ '+left.length+'匹 耐えた（'+cap+'本＝'+cap+'匹まで）'); }
+  else if(sealed>0) tipMsg('封じた！ 次の輪を作れ');
+  // 使った桿菌は解放（消耗は入れていない＝操作方式の比較に集中するため）
+  for(const r of chain) r.joined=false;
+  chain=[];
+  updateHud();
+}
+function undo(){
+  const r=chain.pop(); if(!r) return;
+  r.joined=false; r.glow=0; pop(Math.max(1,chain.length));
+}
+
+cv.addEventListener('mousedown',e=>{ac();pointer=pos(e);});
+cv.addEventListener('mousemove',e=>{if(pointer)pointer=pos(e);});
+window.addEventListener('mouseup',()=>{if(pointer)commit();});
+cv.addEventListener('touchstart',e=>{e.preventDefault();ac();pointer=pos(e.changedTouches[0]);},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();if(pointer)pointer=pos(e.changedTouches[0]);},{passive:false});
+cv.addEventListener('touchend',e=>{e.preventDefault();if(pointer)commit();},{passive:false});
+cv.addEventListener('touchcancel',e=>{e.preventDefault();pointer=null;},{passive:false});
+document.getElementById('reset').addEventListener('click',()=>{scatter();});
+document.getElementById('undo').addEventListener('click',()=>{undo();});
+
+// ---------- 音 ----------
+let A=null;
+function ac(){ if(!A){ try{A=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(A&&A.state==='suspended')A.resume(); }
+function pop(n){ if(!A)return; try{
+  const t=A.currentTime, o=A.createOscillator(), gg=A.createGain();
+  const base=520+Math.min(n,40)*26;
+  o.type='sine'; o.frequency.setValueAtTime(base,t); o.frequency.exponentialRampToValueAtTime(base*1.5,t+0.05);
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.18,t+0.008); gg.gain.exponentialRampToValueAtTime(0.0001,t+0.13);
+  o.connect(gg).connect(A.destination); o.start(t); o.stop(t+0.16);
+}catch(e){} }
+function fizz(count,strong){ if(!A)return; try{
+  const t=A.currentTime, dur=0.28+Math.min(count,8)*0.02;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate), ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.frequency.setValueAtTime(1800,t); bp.frequency.exponentialRampToValueAtTime(600,t+dur); bp.Q.value=0.8;
+  const gg=A.createGain(); gg.gain.setValueAtTime(count?0.28:0.08,t); gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+  if(count>0){ const chord=520+Math.min(strong,40)*20;
+    [0,4,7].slice(0,1+Math.min(count,2)).forEach((iv,k)=>{
+      const o=A.createOscillator(), og=A.createGain();
+      o.type='triangle'; o.frequency.value=chord*Math.pow(2,iv/12);
+      og.gain.setValueAtTime(0.0001,t+k*0.03); og.gain.exponentialRampToValueAtTime(0.12,t+0.02+k*0.03); og.gain.exponentialRampToValueAtTime(0.0001,t+0.3+k*0.03);
+      o.connect(og).connect(A.destination); o.start(t+k*0.03); o.stop(t+0.34+k*0.03); }); }
+}catch(e){} }
+function resistSnd(n){ if(!A)return; try{
+  const t=A.currentTime, dur=0.26, o=A.createOscillator(), og=A.createGain();
+  o.type='square'; o.frequency.setValueAtTime(150,t); o.frequency.exponentialRampToValueAtTime(96,t+dur);
+  const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=700;
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.05+Math.min(n,6)*0.012,t+0.02);
+  og.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(lp).connect(og).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+}catch(e){} }
+function blockSnd(){ if(!A)return; try{
+  const t=A.currentTime, dur=0.14, o=A.createOscillator(), og=A.createGain();
+  o.type='sawtooth'; o.frequency.setValueAtTime(220,t); o.frequency.exponentialRampToValueAtTime(90,t+dur);
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.10,t+0.01); og.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(og).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+}catch(e){} }
+
+// ---------- 描画 ----------
+function drawRod(r,inChain){
+  g.save(); g.translate(r.x,r.y); g.rotate(r.ang+Math.sin(r.phase)*0.06);
+  if(inChain){ g.shadowColor='rgba(140,240,200,.9)'; g.shadowBlur=10; }
+  g.fillStyle=inChain? '#c8ffe6':'#dfeef0';
+  g.strokeStyle=inChain? 'rgba(120,235,190,.9)':'rgba(120,150,160,.5)'; g.lineWidth=1;
+  const h=RLEN/2, w=RW/2;
+  g.beginPath(); g.arc(-h,0,w,Math.PI/2,Math.PI*1.5); g.arc(h,0,w,-Math.PI/2,Math.PI/2); g.closePath();
+  g.fill(); g.stroke(); g.restore();
+}
+function drawFoe(f){
+  g.save(); g.translate(f.x,f.y); g.rotate(f.phase*0.3);
+  const k=f.dead? Math.max(0,1-f.dt*3):1;
+  g.globalAlpha=k; const R=f.r*k;
+  g.beginPath();
+  const n=f.spikes.length;
+  for(let i=0;i<=n;i++){ const a=i/n*Math.PI*2, rr=R*f.spikes[i%n]*(1+Math.sin(f.phase+i)*0.06);
+    const x=Math.cos(a)*rr, y=Math.sin(a)*rr; i?g.lineTo(x,y):g.moveTo(x,y); }
+  g.closePath();
+  const rs=f.resist||0, bl=f.block||0;
+  g.fillStyle= f.dead? 'rgba(150,90,60,'+k+')'
+    : (rs>0||bl>0? 'rgba('+(120+110*Math.max(rs,bl))+',60,80,.95)':'rgba(120,74,96,.92)');
+  g.shadowColor=(rs>0||bl>0)? 'rgba(255,90,70,.8)':'rgba(60,20,40,.6)';
+  g.shadowBlur=(rs>0||bl>0)? 20:8; g.fill(); g.shadowBlur=0;
+  g.beginPath(); g.arc(0,0,R*0.42,0,7); g.fillStyle='rgba(60,30,44,.9)'; g.fill();
+  if(!f.dead){ g.beginPath(); g.arc(0,0,R+5,0,7); g.strokeStyle='rgba(190,120,150,.30)'; g.lineWidth=1.5; g.stroke(); }
+  if(bl>0){ g.beginPath(); g.arc(0,0,R+6+(1-bl)*16,0,7);
+    g.strokeStyle='rgba(255,110,90,'+(0.85*bl)+')'; g.lineWidth=3; g.stroke(); }
+  g.restore(); g.globalAlpha=1;
+}
+let tms=0;
+function loop(ts){
+  const dt=Math.min(0.05,(tms?ts-tms:16)/1000); tms=ts; clock+=dt;
+
+  g.save();
+  if(shake>0.2){ const s=shake; g.translate(rnd(-s,s),rnd(-s,s)); shake*=0.86; } else shake=0;
+  g.clearRect(-20,-20,W+40,H+40);
+  const bg=g.createRadialGradient(W/2,H*0.45,60,W/2,H*0.45,Math.max(W,H)*0.8);
+  bg.addColorStop(0,'#12202a'); bg.addColorStop(1,'#0b0f14'); g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
+
+  for(const f of foes){ f.phase+=dt*(1+f.spin); if(f.dead) f.dt+=dt;
+    if(f.resist>0){f.resist-=dt*1.4; if(f.resist<0)f.resist=0;}
+    if(f.block>0){f.block-=dt*1.6; if(f.block<0)f.block=0;}
+    drawFoe(f); }
+  foes=foes.filter(f=>!(f.dead&&f.dt>0.5));
+
+  for(const s of seals){ s.life-=dt*2.2;
+    if(s.life>0){ g.beginPath(); g.moveTo(s.poly[0].x,s.poly[0].y);
+      for(let i=1;i<s.poly.length;i++) g.lineTo(s.poly[i].x,s.poly[i].y); g.closePath();
+      g.fillStyle= s.partial? 'rgba(245,200,120,'+(0.26*s.life)+')':'rgba(150,245,205,'+(0.30*s.life)+')';
+      g.strokeStyle= s.partial? 'rgba(255,215,140,'+(0.7*s.life)+')':'rgba(180,255,220,'+(0.7*s.life)+')';
+      g.lineWidth=3; g.fill(); g.stroke(); } }
+  seals=seals.filter(s=>s.life>0);
+
+  for(const b of bits){ b.x+=b.vx; b.y+=b.vy; b.vy+=0.06; b.life-=dt*1.6;
+    if(b.life>0){ g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7); g.fillStyle='rgba(160,245,200,'+(0.7*b.life)+')'; g.fill(); } }
+  bits=bits.filter(b=>b.life>0);
+
+  // 確定済みの鎖（桿菌は動かない＝多角形はそのまま輪になる）
+  if(chain.length>1){
+    g.beginPath(); g.moveTo(chain[0].x,chain[0].y);
+    for(let i=1;i<chain.length;i++) g.lineTo(chain[i].x,chain[i].y);
+    g.strokeStyle='rgba(140,240,200,.55)'; g.lineWidth=RW*0.9; g.lineCap='round'; g.lineJoin='round';
+    g.shadowColor='rgba(140,240,200,.5)'; g.shadowBlur=10; g.stroke(); g.shadowBlur=0;
+  }
+  // 閉じられる時は最初の1本を光らせる
+  if(chain.length>=3){
+    const f0=chain[0], pulse=0.5+0.5*Math.sin(clock*5);
+    g.beginPath(); g.arc(f0.x,f0.y,16+4*pulse,0,7);
+    g.strokeStyle='rgba(160,255,215,'+(0.35+0.4*pulse)+')'; g.lineWidth=2.5; g.stroke();
+  }
+
+  // ★プレビュー：押している間だけ「これから引く線」を見せる（離して確定）
+  const pv=preview();
+  if(pv){
+    const from = pv.kind==='first'? null : chain[chain.length-1];
+    const to = pv.target;
+    if(from){
+      g.save(); g.setLineDash([6,6]);
+      g.beginPath(); g.moveTo(from.x,from.y); g.lineTo(to.x,to.y);
+      g.strokeStyle= pv.blocked? 'rgba(255,110,90,.95)':'rgba(160,255,215,.9)';
+      g.lineWidth=3; g.stroke(); g.restore();
+    }
+    // 掴む相手を丸で囲む（指の外に出る大きさ）
+    g.beginPath(); g.arc(to.x,to.y,26,0,7);
+    g.strokeStyle= pv.blocked? 'rgba(255,110,90,.95)':'rgba(160,255,215,.9)';
+    g.lineWidth=3; g.stroke();
+    if(pv.blocked){   // 邪魔している腐敗菌を名指しする
+      g.beginPath(); g.arc(pv.blocked.x,pv.blocked.y,pv.blocked.r+22,0,7);
+      g.strokeStyle='rgba(255,110,90,.95)'; g.lineWidth=3; g.stroke();
+    }
+  }
+
+  for(const r of rods){ r.phase+=dt*1.5; if(r.glow>0) r.glow-=dt*2; drawRod(r,r.joined); }
+
+  // 今の本数＝溶かせる匹数
+  if(chain.length>0){
+    g.save();
+    g.font='800 15px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+    const last=chain[chain.length-1];
+    g.beginPath(); g.arc(last.x,last.y-30,15,0,7);
+    g.fillStyle='rgba(6,14,12,.82)'; g.fill();
+    g.strokeStyle='rgba(140,250,200,.95)'; g.lineWidth=2; g.stroke();
+    g.fillStyle='#a6ffd4'; g.fillText(chain.length,last.x,last.y-29);
+    g.restore();
+  }
+
+  g.restore();
+  requestAnimationFrame(loop);
+}
+resize(); scatter(); requestAnimationFrame(loop);
+window.__dbg={rods:()=>rods,foes:()=>foes,chain:()=>chain,setPointer:(x,y)=>{pointer={x,y}},commit:()=>commit(),
+  preview:()=>{const p=preview();return p?{kind:p.kind,blocked:!!p.blocked}:null;}};
+</script>
+</body>
+</html>
