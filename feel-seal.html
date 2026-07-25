@@ -60,10 +60,9 @@ const FOE_R=13*SCALE;                // 腐敗菌の半径
 //   固定数だとSE3(375x667)は390x844比で湧き範囲の面積が68%＝密度が26%上がり渋滞する
 const REF_AREA=390*604, RODS_REF=64, FOES_REF=14;
 
-// ★オフセット操作（指より上を操作点にする）ため、指が届く範囲が上下に狭まる。
-//   盤面の上下端をここで一元管理する。下部は手が被るので大きく空ける
-const PLAY_TOP=150;
-function playBot(){ return H-180; }
+// 盤面の上下端はここで一元管理する（HUDとボタンを避ける分だけ空ける）
+const PLAY_TOP=110;
+function playBot(){ return H-120; }
 function playArea(){ return W*Math.max(120, playBot()-PLAY_TOP); }
 function rodCount(){ return Math.max(20, Math.round(RODS_REF*playArea()/REF_AREA)); }
 function foeCount(){ return Math.max(5,  Math.round(FOES_REF*playArea()/REF_AREA)); }
@@ -75,6 +74,11 @@ const SPENT=3.0;
 // ★酸の帯（なぞりの軌跡）の寿命。尾から蒸発するので、大きく囲うには素早く回る必要がある。
 //   ただし鎖が団子にならないよう「鎖の長さ＋余白」は age に関係なく必ず残す
 const TRAIL_LIFE=1.5;
+// ★手の死角対策。指と手のひらは半径55〜64pxを覆うので、近くの腐敗菌には
+//   「手の外側まではみ出す大きさ」の警告リングを出す。操作系は変えない
+const DANGER_R=95;     // 警告に気付き始める距離
+const HAND_R=64;       // この距離まで来たら手の下＝警告を最大にする
+function warnLevel(d){ return Math.max(0, Math.min(1, (DANGER_R-d)/(DANGER_R-HAND_R))); }
 
 let rods=[];   // {x,y,ang,joined,order,phase}
 let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
@@ -111,31 +115,20 @@ let sealCooldown=0;
 let clock=0;   // 経過秒。軌跡の各点の生成時刻に使う
 function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
 
-// ★オフセット操作：実際の操作点（head）を指より上に置く。
-//   指と手のひらが画面を覆って、拾う瞬間と進行先の腐敗菌が死角に入るのを避ける。
-//   マウスは遮蔽が無いので直接操作のまま（タッチで触った時だけ有効化）
-const HAND_OFFSET=64;
-let useOffset=false, finger={x:0,y:0};
-function toHead(x,y){
-  if(!useOffset) return {x,y};
-  return {x, y:Math.max(PLAY_TOP-40, y-HAND_OFFSET)};
-}
-
-function start(fx,fy){
+// ※オフセット操作（操作点を指より上に置く）は試したが却下。
+//   ユーザー評「違和感があり、手が邪魔になっていた修正前よりミスが多発する」。
+//   → 操作は指の直下（直接タッチ）に戻し、手の死角は"見せ方"だけで補う
+function start(x,y){
   rods.forEach(r=>{r.joined=false;});
-  finger={x:fx,y:fy};
-  const h=toHead(fx,fy);
-  dragging=true; path=[{x:h.x,y:h.y,t:clock}]; head={x:h.x,y:h.y}; prevHead={x:h.x,y:h.y};
+  dragging=true; path=[{x,y,t:clock}]; head={x,y}; prevHead={x,y};
   orderSeq=0; joinedCount=0; sealCooldown=0;
-  ac(); catchNear(h.x,h.y);
+  ac(); catchNear(x,y);
 }
-function moveTo(fx,fy){
+function moveTo(x,y){
   if(!dragging) return;
-  finger={x:fx,y:fy};
-  const h=toHead(fx,fy);
   const last=path[path.length-1];
-  if(Math.hypot(h.x-last.x,h.y-last.y)>3){ path.push({x:h.x,y:h.y,t:clock}); if(path.length>600)path.shift(); }
-  head={x:h.x,y:h.y}; catchNear(h.x,h.y);
+  if(Math.hypot(x-last.x,y-last.y)>3){ path.push({x,y,t:clock}); if(path.length>600)path.shift(); }
+  head={x,y}; catchNear(x,y);
   if(sealCooldown<=0) checkClose();
 }
 function end(){ dragging=false; }
@@ -278,10 +271,10 @@ function shatter(ox,oy){
   tipMsg('腐敗菌に触れると鎖が弾ける！ 触れずに囲め');
 }
 
-cv.addEventListener('mousedown',e=>{useOffset=false;const p=pos(e);start(p.x,p.y);});
+cv.addEventListener('mousedown',e=>{const p=pos(e);start(p.x,p.y);});
 cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
 window.addEventListener('mouseup',end);
-cv.addEventListener('touchstart',e=>{e.preventDefault();useOffset=true;const p=pos(e.changedTouches[0]);start(p.x,p.y);},{passive:false});
+cv.addEventListener('touchstart',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);start(p.x,p.y);},{passive:false});
 cv.addEventListener('touchmove',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);moveTo(p.x,p.y);},{passive:false});
 cv.addEventListener('touchend',e=>{e.preventDefault();end();},{passive:false});
 // 指が画面外に出た/システムジェスチャで奪われた時に握ったままにならないよう保険
@@ -394,7 +387,7 @@ function drawRod(x,y,ang,joined,alpha,weak){
   g.fill(); g.stroke();
   g.restore(); g.globalAlpha=1;
 }
-function drawFoe(f){
+function drawFoe(f,warn){
   g.save(); g.translate(f.x,f.y); g.rotate(f.phase*0.3);
   const scale = f.dead ? Math.max(0,1-f.dt*3) : 1;
   const alpha = f.dead ? Math.max(0,1-f.dt*3) : 1;
@@ -413,6 +406,20 @@ function drawFoe(f){
   g.shadowBlur= rs>0? 8+16*rs : 8; g.fill(); g.shadowBlur=0;
   // 核
   g.beginPath(); g.arc(0,0,R*0.42,0,7); g.fillStyle='rgba(60,30,44,.9)'; g.fill();
+  // ★手の死角対策：近いほど大きく広がる警告リング。
+  //   半径が手の遮蔽（55〜64px）を超えるので、指の下に隠れていても弧が外に見える
+  if(warn>0 && !f.dead){
+    const pulse=0.72+0.28*Math.sin(clock*9);
+    g.beginPath(); g.arc(0,0,f.r+20+48*warn,0,7);
+    g.strokeStyle='rgba(255,150,110,'+(0.95*warn*pulse)+')'; g.lineWidth=2.5+3*warn; g.stroke();
+    g.beginPath(); g.arc(0,0,f.r+10,0,7);
+    g.strokeStyle='rgba(255,190,150,'+(0.85*warn)+')'; g.lineWidth=2.5; g.stroke();
+  }
+  // 生きている腐敗菌の輪郭を少し外に出して見つけやすくする
+  if(!f.dead){
+    g.beginPath(); g.arc(0,0,R+5,0,7);
+    g.strokeStyle='rgba(190,120,150,.30)'; g.lineWidth=1.5; g.stroke();
+  }
   // 耐えたリング（外へ弾き返す）
   if(rs>0){
     g.beginPath(); g.arc(0,0,R+4+(1-rs)*10,0,7);
@@ -437,7 +444,13 @@ function loop(ts){
   // 腐敗菌
   for(const f of foes){ f.phase+=dt*(1+f.spin); if(f.dead) f.dt+=dt;
     if(f.resist>0){ f.resist-=dt*1.4; if(f.resist<0) f.resist=0; }
-    drawFoe(f); }
+    // 操作中の指に近い腐敗菌ほど強く警告する（手の下に隠れている想定）
+    let warn=0;
+    if(dragging && !f.dead){
+      const d=Math.hypot(f.x-head.x, f.y-head.y);
+      warn=warnLevel(d);
+    }
+    drawFoe(f,warn); }
   foes=foes.filter(f=>!(f.dead&&f.dt>0.5));
 
   // 封印フラッシュ
@@ -556,20 +569,17 @@ function loop(ts){
     drawRod(r.x,r.y,r.ang,true);
   }
 
-  // オフセット操作中は「指の位置」と「実際の操作点」の対応を示す
-  if(dragging && useOffset){
-    g.save();
-    g.setLineDash([3,5]);
-    g.beginPath(); g.moveTo(finger.x,finger.y); g.lineTo(head.x,head.y);
-    g.strokeStyle='rgba(150,240,205,.35)'; g.lineWidth=1.5; g.stroke();
-    g.setLineDash([]);
-    // 指の位置＝細い輪だけ（塗ると手の下で無駄になる）
-    g.beginPath(); g.arc(finger.x,finger.y,13,0,7);
-    g.strokeStyle='rgba(150,240,205,.30)'; g.lineWidth=1.5; g.stroke();
-    g.restore();
+  // 指先。近くに腐敗菌が居る時は指の上側にも見える警告の輪を重ねる
+  if(dragging){
+    let near=0;
+    for(const f of foes){ if(f.dead) continue;
+      const d=Math.hypot(f.x-head.x,f.y-head.y);
+      near=Math.max(near, warnLevel(d)); }
+    if(near>0){
+      g.beginPath(); g.arc(head.x,head.y,30+10*near,0,7);
+      g.strokeStyle='rgba(255,150,110,'+(0.35+0.55*near)+')'; g.lineWidth=3; g.stroke();
+    }
   }
-
-  // 操作点（先頭）
   if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
     g.fillStyle='rgba(200,255,230,.9)'; g.shadowColor='#8ff0c0'; g.shadowBlur=16; g.fill(); g.shadowBlur=0;
     // ★今の鎖本数＝一度に溶かせる匹数。閉じる前に足りるか判断させる
@@ -596,8 +606,7 @@ function loop(ts){
 }
 resize(); scatter(); requestAnimationFrame(loop);
 window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals,path:()=>path,
-  head:()=>head, finger:()=>finger, bounds:()=>({top:PLAY_TOP,bot:playBot(),offset:HAND_OFFSET}),
-  setOffset:v=>{useOffset=v}};
+  head:()=>head, bounds:()=>({top:PLAY_TOP,bot:playBot()})};
 </script>
 </body>
 </html>
