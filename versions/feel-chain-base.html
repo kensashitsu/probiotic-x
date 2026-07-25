@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>桿菌つなぎ 実験</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;color:#eee;
+    touch-action:none;overscroll-behavior:none}
+  canvas{position:absolute;inset:0;width:100%;height:100dvh;display:block}
+  #hud{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:0;right:0;text-align:center;
+    pointer-events:none;z-index:5}
+  #hud .n{font-size:15px;color:#bfe9d2;letter-spacing:.04em}
+  #hud .n b{font-size:26px;color:#8ff0c0;font-weight:800}
+  #hud .best{font-size:12px;color:#7a8a86;margin-top:2px}
+  #reset{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 16px);left:50%;transform:translateX(-50%);
+    font:inherit;font-size:14px;font-weight:700;color:#0b0f14;background:#8ff0c0;border:0;border-radius:999px;
+    padding:10px 22px;z-index:6}
+  #tip{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 64px);left:0;right:0;text-align:center;
+    font-size:13px;color:#6f7d84;z-index:5;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud"><div class="n">つながった <b id="cnt">0</b></div><div class="best" id="best"></div></div>
+<div id="tip">指でなぞって 桿菌をつなげてみて</div>
+<button id="reset">まき直す</button>
+
+<script>
+'use strict';
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
+let W,H,DPR;
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=cv.clientWidth; H=cv.clientHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  g.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',resize);
+
+// ---- 桿菌 ----
+const RODS=90;                 // 散らばる数
+const RLEN=15, RW=6.2;         // 桿菌の長さ・太さ
+const SPACING=15.5;            // 鎖の玉間隔
+const CATCH_R=40;              // 吸い付く射程
+let rods=[];                   // {x,y,ang, bx,by, joined, order, phase}
+let best=+(localStorage.getItem('rodChainBest')||0);
+
+function scatter(){
+  rods=[];
+  for(let i=0;i<RODS;i++){
+    const x=rnd(40,W-40), y=rnd(90,H-120);
+    rods.push({x,y, ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28});
+  }
+  updateHud(0);
+}
+function rnd(a,b){return a+Math.random()*(b-a);}
+
+// ---- 入力（1本指でまず試す）----
+let dragging=false, path=[], orderSeq=0, joinedCount=0, head={x:0,y:0};
+function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function start(x,y){
+  // 前の鎖はほどいて（散らばったまま）新しく始める
+  rods.forEach(r=>{r.joined=false;});
+  dragging=true; path=[{x,y}]; head={x,y}; orderSeq=0; joinedCount=0;
+  updateHud(0); ac(); catchNear(x,y);
+}
+function moveTo(x,y){
+  if(!dragging) return;
+  const last=path[path.length-1];
+  if(Math.hypot(x-last.x,y-last.y)>3){ path.push({x,y}); if(path.length>500)path.shift(); }
+  head={x,y}; catchNear(x,y);
+}
+function end(){ dragging=false; }
+function catchNear(x,y){
+  for(const r of rods){
+    if(r.joined) continue;
+    if(Math.hypot(r.x-x,r.y-y)<=CATCH_R){
+      r.joined=true; r.order=orderSeq++; joinedCount++;
+      pop(joinedCount);
+      if(joinedCount>best){ best=joinedCount; localStorage.setItem('rodChainBest',best); }
+      updateHud(joinedCount);
+    }
+  }
+}
+function updateHud(n){ elCnt.textContent=n; elBest.textContent= best? 'これまでの最長 '+best : ''; }
+
+cv.addEventListener('mousedown',e=>{const p=pos(e);start(p.x,p.y);});
+cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
+window.addEventListener('mouseup',end);
+cv.addEventListener('touchstart',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);start(p.x,p.y);},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);moveTo(p.x,p.y);},{passive:false});
+cv.addEventListener('touchend',e=>{e.preventDefault();end();},{passive:false});
+document.getElementById('reset').addEventListener('click',()=>{scatter();document.getElementById('tip').style.opacity=1;});
+
+// ---- 鎖の目標位置：指(head)から後ろへ SPACING 間隔で並べる ----
+function pointBack(d){
+  let acc=0;
+  for(let i=path.length-1;i>0;i--){
+    const a=path[i], b=path[i-1];
+    const seg=Math.hypot(a.x-b.x,a.y-b.y);
+    if(acc+seg>=d){ const t=(d-acc)/Math.max(0.001,seg);
+      return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t, ang:Math.atan2(a.y-b.y,a.x-b.x)}; }
+    acc+=seg;
+  }
+  const p=path[0]||head; return {x:p.x,y:p.y,ang:0};
+}
+
+// ---- Web Audio: つながる度に音程が上がる「ポコッ」 ----
+let A=null; function ac(){ if(!A){ try{A=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(A&&A.state==='suspended')A.resume(); }
+function pop(n){ if(!A)return; try{
+  const t=A.currentTime, o=A.createOscillator(), gg=A.createGain();
+  const base=520+Math.min(n,40)*26;         // 長くなるほど高く
+  o.type='sine'; o.frequency.setValueAtTime(base,t); o.frequency.exponentialRampToValueAtTime(base*1.5,t+0.05);
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.22,t+0.008); gg.gain.exponentialRampToValueAtTime(0.0001,t+0.13);
+  o.connect(gg).connect(A.destination); o.start(t); o.stop(t+0.16);
+}catch(e){} }
+
+// ---- 描画 ----
+let tms=0;
+function drawRod(x,y,ang,joined,glow){
+  g.save(); g.translate(x,y); g.rotate(ang);
+  if(glow){ g.shadowColor='rgba(140,240,200,.9)'; g.shadowBlur=10; }
+  g.fillStyle=joined? '#c8ffe6' : '#dfeef0';
+  g.strokeStyle=joined? 'rgba(120,235,190,.9)':'rgba(120,150,160,.5)'; g.lineWidth=1;
+  const h=RLEN/2, r=RW/2;
+  g.beginPath();
+  g.arc(-h,0,r,Math.PI/2,Math.PI*1.5);
+  g.arc(h,0,r,-Math.PI/2,Math.PI/2);
+  g.closePath(); g.fill(); g.stroke();
+  g.restore();
+}
+function loop(ts){
+  const dt=Math.min(0.05,(tms?ts-tms:16)/1000); tms=ts;
+  g.clearRect(0,0,W,H);
+  const bg=g.createRadialGradient(W/2,H*0.45,60,W/2,H*0.45,Math.max(W,H)*0.8);
+  bg.addColorStop(0,'#12202a'); bg.addColorStop(1,'#0b0f14'); g.fillStyle=bg; g.fillRect(0,0,W,H);
+
+  // 鎖の目標へ寄せる（磁石の吸い付き）＋つなぎ線
+  const joined=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
+  const targets=[];
+  for(let k=0;k<joined.length;k++){
+    const rank=joined.length-1-k;              // 新しいほど head に近い
+    const tp=pointBack((rank+1)*SPACING);
+    targets.push(tp);
+  }
+  // つなぎ線（うっすら光る帯）
+  if(joined.length){
+    g.beginPath(); g.moveTo(head.x,head.y);
+    for(let k=joined.length-1;k>=0;k--) g.lineTo(targets[k].x,targets[k].y);
+    g.strokeStyle='rgba(140,240,200,.28)'; g.lineWidth=RW+3; g.lineCap='round'; g.lineJoin='round';
+    g.shadowColor='rgba(140,240,200,.6)'; g.shadowBlur=12; g.stroke(); g.shadowBlur=0;
+  }
+  // 浮遊中の桿菌
+  for(const r of rods){ if(r.joined) continue;
+    r.phase+=dt*1.5; const wob=Math.sin(r.phase)*0.06;
+    // 近くの指にほんの少し向く（吸い付きの予兆）
+    if(dragging){ const d=Math.hypot(r.x-head.x,r.y-head.y);
+      if(d<CATCH_R*2.2){ const a=Math.atan2(head.y-r.y,head.x-r.x);
+        let da=a-r.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+        r.ang+= da*(1-d/(CATCH_R*2.2))*0.12; } }
+    drawRod(r.x,r.y,r.ang+wob,false,false);
+  }
+  // つながった桿菌：目標へ ease（吸い付き）
+  for(let k=0;k<joined.length;k++){
+    const r=joined[k], tp=targets[k];
+    r.x+=(tp.x-r.x)*0.30; r.y+=(tp.y-r.y)*0.30;
+    let da=tp.ang-r.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+    r.ang+=da*0.35;
+    drawRod(r.x,r.y,r.ang,true,true);
+  }
+  // 指先の光点
+  if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
+    g.fillStyle='rgba(200,255,230,.9)'; g.shadowColor='#8ff0c0'; g.shadowBlur=16; g.fill(); g.shadowBlur=0; }
+
+  if(joined.length>0) document.getElementById('tip').style.opacity=0;
+  requestAnimationFrame(loop);
+}
+resize(); scatter(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>

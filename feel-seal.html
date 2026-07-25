@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>囲って封じる 実験</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;color:#eee;
+    touch-action:none;overscroll-behavior:none}
+  canvas{position:absolute;inset:0;width:100%;height:100dvh;display:block}
+  #hud{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:0;right:0;text-align:center;
+    pointer-events:none;z-index:5}
+  #hud .n{font-size:15px;color:#bfe9d2;letter-spacing:.04em}
+  #hud .n b{font-size:26px;color:#8ff0c0;font-weight:800}
+  #hud .best{font-size:12px;color:#7a8a86;margin-top:2px}
+  #reset{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 16px);left:50%;transform:translateX(-50%);
+    font:inherit;font-size:14px;font-weight:700;color:#0b0f14;background:#8ff0c0;border:0;border-radius:999px;
+    padding:10px 22px;z-index:6}
+  #tip{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 64px);left:0;right:0;text-align:center;
+    font-size:13px;color:#6f7d84;z-index:5;pointer-events:none;transition:opacity .4s}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud"><div class="n">封じた <b id="cnt">0</b></div><div class="best" id="best"></div></div>
+<div id="tip">なぞって桿菌を繋ぎ 腐敗菌を輪で囲め（繋いだ本数だけ溶かせる）</div>
+<button id="reset">まき直す</button>
+
+<script>
+'use strict';
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
+let W,H,DPR;
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=cv.clientWidth; H=cv.clientHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  g.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',resize);
+
+// ============================================================
+//  乳酸菌（味方・桿菌）= 拾って鎖を伸ばす
+//  腐敗菌（敵・胞子塊）  = なぞりの輪で囲むと酸で溶ける
+// ============================================================
+// ★実機（4.7インチ=375x667）だと桿菌が2.3mmしかなく小さいので一括で拡大する。
+//   見づらい/大きすぎる場合はこの1つだけ触れば全体が揃って変わる
+const SCALE=1.25;
+const RLEN=15*SCALE, RW=6.2*SCALE;   // 桿菌の長さ・太さ
+const SPACING=15.5*SCALE;            // 鎖の玉間隔
+const CATCH_R=40*SCALE;              // 吸い付く射程
+const FOE_R=13*SCALE;                // 腐敗菌の半径
+
+// ★盤面の密度は画面サイズに依らず一定にする。
+//   固定数だとSE3(375x667)は390x844比で湧き範囲の面積が68%＝密度が26%上がり渋滞する
+const REF_AREA=390*604, RODS_REF=64, FOES_REF=14;
+function playArea(){ return W*Math.max(120,(H-130)-100); }
+function rodCount(){ return Math.max(20, Math.round(RODS_REF*playArea()/REF_AREA)); }
+function foeCount(){ return Math.max(5,  Math.round(FOES_REF*playArea()/REF_AREA)); }
+const DOOM=4.5;               // 弾け飛んだ菌の餓死までの秒数
+const DOOM_WARN=1.8;          // 残りこの秒数で点滅予告
+// ★酸を出した桿菌は消耗する（自家中毒）。封じた匹数だけ鎖から抜けて使用不能になり、
+//   この秒数で回復して再び拾える。-1 にすると永久死（盤面が減り続ける）
+const SPENT=3.0;
+// ★酸の帯（なぞりの軌跡）の寿命。尾から蒸発するので、大きく囲うには素早く回る必要がある。
+//   ただし鎖が団子にならないよう「鎖の長さ＋余白」は age に関係なく必ず残す
+const TRAIL_LIFE=1.5;
+
+let rods=[];   // {x,y,ang,joined,order,phase}
+let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
+let bits=[];   // 溶けカス粒子
+let seals=[];  // 封印フラッシュ {poly,life}
+let shards=[]; // シャッターの破片フラッシュ
+let best=+(localStorage.getItem('sealBest')||0);
+let totalSealed=0;
+let hitCd=0;   // 衝突クールダウン
+let shake=0;   // 画面揺れ
+
+function rnd(a,b){return a+Math.random()*(b-a);}
+
+function scatter(){
+  rods=[];
+  const N=rodCount();
+  for(let i=0;i<N;i++){
+    rods.push({x:rnd(40,W-40), y:rnd(100,H-130), ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28, vx:0,vy:0,vr:0, doom:0, spent:0, dead:false});
+  }
+  foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
+  bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
+  updateHud();
+}
+function spawnFoe(){
+  const spikes=[]; const n=9;
+  for(let i=0;i<n;i++) spikes.push(0.75+Math.random()*0.5);
+  foes.push({x:rnd(50,W-50), y:rnd(110,H-140), r:FOE_R*rnd(0.8,1.25),
+             phase:Math.random()*6.28, spin:rnd(-0.5,0.5), dead:false, dt:0, spikes});
+}
+
+// ---------------- 入力 ----------------
+let dragging=false, path=[], orderSeq=0, joinedCount=0, head={x:0,y:0}, prevHead={x:0,y:0};
+let sealCooldown=0;
+let clock=0;   // 経過秒。軌跡の各点の生成時刻に使う
+function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function start(x,y){
+  rods.forEach(r=>{r.joined=false;});
+  dragging=true; path=[{x,y,t:clock}]; head={x,y}; prevHead={x,y}; orderSeq=0; joinedCount=0; sealCooldown=0;
+  ac(); catchNear(x,y);
+}
+function moveTo(x,y){
+  if(!dragging) return;
+  const last=path[path.length-1];
+  if(Math.hypot(x-last.x,y-last.y)>3){ path.push({x,y,t:clock}); if(path.length>600)path.shift(); }
+  head={x,y}; catchNear(x,y);
+  if(sealCooldown<=0) checkClose();
+}
+function end(){ dragging=false; }
+function catchNear(x,y){
+  for(const r of rods){
+    if(r.joined) continue;
+    if(r.spent>0) continue;          // 消耗中は酸を出せない＝拾えない
+    if(Math.hypot(r.x-x,r.y-y)<=CATCH_R){
+      r.joined=true; r.order=orderSeq++; joinedCount++;
+      r.doom=0; r.vx=0; r.vy=0; r.vr=0;   // 救出＝餓死タイマー解除
+      r.follow=0.30; r.b=null;             // 吸い付く瞬間だけ滑り込む／軌跡上の位置は初期化
+      pop(joinedCount);
+    }
+  }
+}
+
+// --- 自己交差でループ検出 → 内側の腐敗菌を封じる ---
+function segInt(p1,p2,p3,p4){
+  const d1x=p2.x-p1.x,d1y=p2.y-p1.y, d2x=p4.x-p3.x,d2y=p4.y-p3.y;
+  const den=d1x*d2y-d1y*d2x; if(Math.abs(den)<1e-6) return null;
+  const t=((p3.x-p1.x)*d2y-(p3.y-p1.y)*d2x)/den;
+  const u=((p3.x-p1.x)*d1y-(p3.y-p1.y)*d1x)/den;
+  if(t>=0&&t<=1&&u>=0&&u<=1) return {x:p1.x+d1x*t, y:p1.y+d1y*t};
+  return null;
+}
+function pointInPoly(px,py,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x,yi=poly[i].y, xj=poly[j].x,yj=poly[j].y;
+    if(((yi>py)!==(yj>py)) && (px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+function checkClose(){
+  const n=path.length; if(n<8) return;
+  const a=path[n-2], b=path[n-1];      // 最新セグメント
+  for(let i=0;i<n-3;i++){
+    const c=path[i], d=path[i+1];
+    const X=segInt(a,b,c,d);
+    if(X){
+      // ループ多角形 = 交点 + path[i+1..n-1]
+      const poly=[X]; for(let k=i+1;k<n;k++) poly.push(path[k]);
+      const area=polyArea(poly);
+      if(area<1400){ return; } // 小さすぎる自己交差は無視（ぶれ）
+      doSeal(poly);
+      // 使ったループぶんを刈る（残りは交点以降＝新たに囲い直せる）
+      path=[{x:X.x,y:X.y,t:clock},{x:b.x,y:b.y,t:clock}];
+      sealCooldown=0.18;
+      return;
+    }
+  }
+}
+function polyArea(poly){
+  let s=0; for(let i=0,j=poly.length-1;i<poly.length;j=i++){ s+=(poly[j].x+poly[i].x)*(poly[j].y-poly[i].y); }
+  return Math.abs(s/2);
+}
+function doSeal(poly){
+  // ★酸の総量 = 鎖の本数。一度に溶かせるのは繋いだ本数まで（＝長い鎖を作る動機）
+  const cap=joinedCount;
+  const inside=foes.filter(f=>!f.dead && pointInPoly(f.x,f.y,poly));
+  // 酸は輪の内側＝重心から効く。近い順に cap 匹だけ溶ける
+  let gx=0,gy=0; for(const p of poly){gx+=p.x;gy+=p.y;} gx/=poly.length; gy/=poly.length;
+  inside.sort((a,b)=>Math.hypot(a.x-gx,a.y-gy)-Math.hypot(b.x-gx,b.y-gy));
+  const melt=inside.slice(0,cap), left=inside.slice(cap);
+
+  let sealed=0;
+  for(const f of melt){
+    f.dead=true; f.dt=0; sealed++;
+    for(let i=0;i<10;i++) bits.push({x:f.x,y:f.y, vx:rnd(-1.2,1.2),vy:rnd(-1.6,0.4), life:1, r:rnd(1.5,3.5)});
+  }
+  // 酸が足りず耐えた腐敗菌＝赤く光って"効かなかった"を明示
+  for(const f of left){ f.resist=1; }
+
+  seals.push({poly, life:1, strong:cap, partial:left.length>0});
+
+  // ★酸を出した分だけ桿菌が消耗（自家中毒）。鎖の後方＝古く繋いだ側から抜ける
+  if(sealed>0){
+    const chain=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
+    for(const r of chain.slice(0,sealed)){
+      r.joined=false; r.order=0;
+      if(SPENT<0){ r.dead=true; }       // 永久死モード
+      else { r.spent=SPENT; }
+      r.vx=rnd(-1.6,1.6); r.vy=rnd(-2.0,-0.4); r.vr=rnd(-0.3,0.3);
+      // 自分が出した酸に溶ける粒
+      for(let i=0;i<5;i++) bits.push({x:r.x,y:r.y, vx:rnd(-0.8,0.8),vy:rnd(-1.0,0.2), life:1, r:rnd(1,2.2)});
+      joinedCount--;
+    }
+    if(joinedCount<0) joinedCount=0;
+  }
+
+  if(sealed>0){
+    totalSealed+=sealed;
+    if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
+    updateHud();
+    fizz(sealed, cap);
+    // 補充（常に囲む対象がある状態に）
+    for(let i=0;i<sealed;i++) setTimeout(spawnFoe, 500+i*120);
+  } else {
+    // 空振り（敵ゼロの輪 or 鎖ゼロ）も薄く鳴らす
+    fizz(0, cap);
+  }
+  if(left.length>0){
+    resistSnd(left.length);
+    tipMsg(cap===0? '鎖が無い！ 桿菌を繋いでから囲め' : '酸が足りない！ '+left.length+'匹 耐えた（鎖'+cap+'本＝'+cap+'匹まで）');
+  }else if(sealed>0 && joinedCount===0){
+    tipMsg('鎖を使い切った！ 酸を出した桿菌は消耗して暫く拾えない');
+  }
+}
+function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
+function updateHud(){ elCnt.textContent=totalSealed; elBest.textContent= best? 'これまで最多 '+best : ''; }
+
+// --- 鎖が腐敗菌に触れたら四散（両側リスク）---
+function checkHit(){
+  if(hitCd>0) return;
+  const HIT=RW/2+6;
+  // 頭（指先）の突っ込み
+  for(const f of foes){ if(f.dead) continue;
+    if(Math.hypot(head.x-f.x,head.y-f.y) < f.r+HIT){ shatter(f.x,f.y); return; } }
+  // 鎖本体（繋がった桿菌）への接触
+  for(const r of rods){ if(!r.joined) continue;
+    for(const f of foes){ if(f.dead) continue;
+      if(Math.hypot(r.x-f.x,r.y-f.y) < f.r+HIT){ shatter(f.x,f.y); return; } } }
+}
+function shatter(ox,oy){
+  const joined=rods.filter(r=>r.joined);
+  if(joined.length===0){ // 空の鎖でも軽い弾き
+    hitCd=0.25; shake=Math.max(shake,4); breakSnd(0); return; }
+  for(const r of joined){
+    r.joined=false; r.order=0;
+    // 衝突点から放射状に、大きくばらけて飛ばす（回収に手間をかける）
+    const a=Math.atan2(r.y-oy,r.x-ox)+rnd(-1.0,1.0);
+    const sp=rnd(11,24);            // 初速アップ＝遠くまで飛ぶ
+    r.vx=Math.cos(a)*sp; r.vy=Math.sin(a)*sp; r.vr=rnd(-0.6,0.6);
+    r.doom=DOOM;                    // 餓死タイマー開始（拾えば救出）
+  }
+  shards.push({x:ox,y:oy,life:1});
+  joinedCount=0; orderSeq=0;
+  hitCd=0.45; shake=Math.max(shake, 6+Math.min(joined.length,12));
+  breakSnd(joined.length);
+  tipMsg('腐敗菌に触れると鎖が弾ける！ 触れずに囲め');
+}
+
+cv.addEventListener('mousedown',e=>{const p=pos(e);start(p.x,p.y);});
+cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
+window.addEventListener('mouseup',end);
+cv.addEventListener('touchstart',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);start(p.x,p.y);},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);moveTo(p.x,p.y);},{passive:false});
+cv.addEventListener('touchend',e=>{e.preventDefault();end();},{passive:false});
+document.getElementById('reset').addEventListener('click',()=>{scatter();document.getElementById('tip').style.opacity=1;});
+
+// ---- 酸の帯を尾から蒸発させる ----
+// 古い点を先頭から捨てる。ただし鎖が追従に使う長さ分は age を無視して残す（団子防止）
+function trimTrail(){
+  if(path.length<3) return;
+  // 伸びている分（r.b が ideal を超えた分）も残さないと、伸びた尻尾が軌跡の端で団子になる
+  let maxB=0;
+  for(const r of rods) if(r.joined && r.b>maxB) maxB=r.b;
+  const need=Math.max(joinedCount*SPACING, maxB)+24;
+  let keep=0, acc=0;
+  for(let i=path.length-1;i>0;i--){
+    acc+=Math.hypot(path[i].x-path[i-1].x, path[i].y-path[i-1].y);
+    if(acc>=need){ keep=i-1; break; }
+  }
+  while(path.length>2 && keep>0 && (clock-path[0].t)>TRAIL_LIFE){ path.shift(); keep--; }
+}
+
+// ---- 鎖の目標位置 ----
+function pointBack(d){
+  let acc=0;
+  for(let i=path.length-1;i>0;i--){
+    const a=path[i], b=path[i-1];
+    const seg=Math.hypot(a.x-b.x,a.y-b.y);
+    if(acc+seg>=d){ const t=(d-acc)/Math.max(0.001,seg);
+      return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t, ang:Math.atan2(a.y-b.y,a.x-b.x)}; }
+    acc+=seg;
+  }
+  // 鎖が軌跡より長い場合は軌跡の末端に溜まる。角度0（真横）だと不自然なので
+  // 末端セグメントの向きを返す
+  const p=path[0]||head, q=path[1]||head;
+  return {x:p.x, y:p.y, ang:Math.atan2(q.y-p.y, q.x-p.x)};
+}
+
+// ---- Web Audio ----
+let A=null; function ac(){ if(!A){ try{A=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(A&&A.state==='suspended')A.resume(); }
+function pop(n){ if(!A)return; try{
+  const t=A.currentTime, o=A.createOscillator(), gg=A.createGain();
+  const base=520+Math.min(n,40)*26;
+  o.type='sine'; o.frequency.setValueAtTime(base,t); o.frequency.exponentialRampToValueAtTime(base*1.5,t+0.05);
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.18,t+0.008); gg.gain.exponentialRampToValueAtTime(0.0001,t+0.13);
+  o.connect(gg).connect(A.destination); o.start(t); o.stop(t+0.16);
+}catch(e){} }
+function fizz(count,strong){ if(!A)return; try{
+  const t=A.currentTime;
+  // シュワッ＝ノイズのバースト
+  const dur=0.28+Math.min(count,8)*0.02;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate);
+  const ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.frequency.setValueAtTime(1800,t); bp.frequency.exponentialRampToValueAtTime(600,t+dur); bp.Q.value=0.8;
+  const gg=A.createGain(); gg.gain.setValueAtTime(count?0.28:0.08,t); gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+  // 封印成立の和音（封じた数だけ上へ）
+  if(count>0){
+    const chord=520+Math.min(strong,40)*20;
+    [0,4,7].slice(0,1+Math.min(count,2)).forEach((iv,k)=>{
+      const o=A.createOscillator(), og=A.createGain();
+      o.type='triangle'; o.frequency.value=chord*Math.pow(2,iv/12);
+      og.gain.setValueAtTime(0.0001,t+k*0.03); og.gain.exponentialRampToValueAtTime(0.12,t+0.02+k*0.03); og.gain.exponentialRampToValueAtTime(0.0001,t+0.3+k*0.03);
+      o.connect(og).connect(A.destination); o.start(t+k*0.03); o.stop(t+0.34+k*0.03);
+    });
+  }
+}catch(e){} }
+
+// 酸が足りず耐えられた時の"にごった"音
+function resistSnd(n){ if(!A)return; try{
+  const t=A.currentTime, dur=0.26;
+  const o=A.createOscillator(), og=A.createGain();
+  o.type='square'; o.frequency.setValueAtTime(150,t); o.frequency.exponentialRampToValueAtTime(96,t+dur);
+  const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=700;
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.05+Math.min(n,6)*0.012,t+0.02);
+  og.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(lp).connect(og).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+}catch(e){} }
+
+function breakSnd(n){ if(!A)return; try{
+  const t=A.currentTime, dur=0.22;
+  // ザッと砕ける低め破裂ノイズ
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate);
+  const ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(2200,t); lp.frequency.exponentialRampToValueAtTime(300,t+dur);
+  const gg=A.createGain(); gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.05+Math.min(n,14)*0.02,t+0.01); gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(lp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+  // 下降のダウナー音
+  if(n>0){ const o=A.createOscillator(), og=A.createGain();
+    o.type='sawtooth'; o.frequency.setValueAtTime(420,t); o.frequency.exponentialRampToValueAtTime(120,t+0.2);
+    og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.10,t+0.01); og.gain.exponentialRampToValueAtTime(0.0001,t+0.22);
+    o.connect(og).connect(A.destination); o.start(t); o.stop(t+0.24); }
+}catch(e){} }
+
+// ---- 描画 ----
+let tms=0;
+function drawRod(x,y,ang,joined,alpha,weak){
+  alpha=alpha==null?1:alpha;
+  g.save(); g.translate(x,y); g.rotate(ang); g.globalAlpha=alpha;
+  if(joined){ g.shadowColor='rgba(140,240,200,.9)'; g.shadowBlur=10; }
+  // weak=餓死しかけ＝退色（乳白→くすんだ灰）
+  g.fillStyle=joined? '#c8ffe6' : (weak? '#9aa0a0' : '#dfeef0');
+  g.strokeStyle=joined? 'rgba(120,235,190,.9)':'rgba(120,150,160,.5)'; g.lineWidth=1;
+  const h=RLEN/2, r=RW/2;
+  g.beginPath(); g.arc(-h,0,r,Math.PI/2,Math.PI*1.5); g.arc(h,0,r,-Math.PI/2,Math.PI/2); g.closePath();
+  g.fill(); g.stroke();
+  g.restore(); g.globalAlpha=1;
+}
+function drawFoe(f){
+  g.save(); g.translate(f.x,f.y); g.rotate(f.phase*0.3);
+  const scale = f.dead ? Math.max(0,1-f.dt*3) : 1;
+  const alpha = f.dead ? Math.max(0,1-f.dt*3) : 1;
+  g.globalAlpha=alpha;
+  const R=f.r*scale;
+  // もやっとした胞子塊（トゲ付き）
+  g.beginPath();
+  const n=f.spikes.length;
+  for(let i=0;i<=n;i++){ const a=i/n*Math.PI*2; const rr=R*f.spikes[i%n]*(1+Math.sin(f.phase+i)*0.06);
+    const x=Math.cos(a)*rr, y=Math.sin(a)*rr; i?g.lineTo(x,y):g.moveTo(x,y); }
+  g.closePath();
+  const rs=f.resist||0;   // 酸に耐えた直後＝赤熱
+  g.fillStyle= f.dead? 'rgba(150,90,60,'+alpha+')'
+             : (rs>0? 'rgba('+(120+110*rs)+','+(74-20*rs)+','+(96-30*rs)+',.95)' : 'rgba(120,74,96,.92)');
+  g.shadowColor= rs>0? 'rgba(255,90,70,'+(0.8*rs)+')' : 'rgba(60,20,40,.6)';
+  g.shadowBlur= rs>0? 8+16*rs : 8; g.fill(); g.shadowBlur=0;
+  // 核
+  g.beginPath(); g.arc(0,0,R*0.42,0,7); g.fillStyle='rgba(60,30,44,.9)'; g.fill();
+  // 耐えたリング（外へ弾き返す）
+  if(rs>0){
+    g.beginPath(); g.arc(0,0,R+4+(1-rs)*10,0,7);
+    g.strokeStyle='rgba(255,110,90,'+(0.75*rs)+')'; g.lineWidth=2+2*rs; g.stroke();
+  }
+  g.restore(); g.globalAlpha=1;
+}
+function loop(ts){
+  const dt=Math.min(0.05,(tms?ts-tms:16)/1000); tms=ts;
+  clock+=dt;
+  if(sealCooldown>0) sealCooldown-=dt;
+  if(hitCd>0) hitCd-=dt;
+  if(dragging){ trimTrail(); checkHit(); }
+
+  g.save();
+  if(shake>0.2){ const s=shake; g.translate(rnd(-s,s),rnd(-s,s)); shake*=0.86; } else shake=0;
+
+  g.clearRect(-20,-20,W+40,H+40);
+  const bg=g.createRadialGradient(W/2,H*0.45,60,W/2,H*0.45,Math.max(W,H)*0.8);
+  bg.addColorStop(0,'#12202a'); bg.addColorStop(1,'#0b0f14'); g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
+
+  // 腐敗菌
+  for(const f of foes){ f.phase+=dt*(1+f.spin); if(f.dead) f.dt+=dt;
+    if(f.resist>0){ f.resist-=dt*1.4; if(f.resist<0) f.resist=0; }
+    drawFoe(f); }
+  foes=foes.filter(f=>!(f.dead&&f.dt>0.5));
+
+  // 封印フラッシュ
+  for(const s of seals){
+    s.life-=dt*2.2;
+    if(s.life>0){
+      g.beginPath(); g.moveTo(s.poly[0].x,s.poly[0].y);
+      for(let i=1;i<s.poly.length;i++) g.lineTo(s.poly[i].x,s.poly[i].y); g.closePath();
+      // 容量不足の封印は琥珀色＝「足りなかった」が一目で分かる
+      if(s.partial){
+        g.fillStyle='rgba(245,200,120,'+(0.26*s.life)+')';
+        g.strokeStyle='rgba(255,215,140,'+(0.7*s.life)+')';
+      }else{
+        g.fillStyle='rgba(150,245,205,'+(0.30*s.life)+')';
+        g.strokeStyle='rgba(180,255,220,'+(0.7*s.life)+')';
+      }
+      g.lineWidth=3; g.fill(); g.stroke();
+    }
+  }
+  seals=seals.filter(s=>s.life>0);
+
+  // 溶けカス
+  for(const b of bits){ b.x+=b.vx; b.y+=b.vy; b.vy+=0.06; b.life-=dt*1.6;
+    if(b.life>0){ g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7); g.fillStyle='rgba(160,245,200,'+(0.7*b.life)+')'; g.fill(); } }
+  bits=bits.filter(b=>b.life>0);
+
+  // 鎖の目標（順序のみ。位置は下でバネ計算する）
+  const joined=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
+  const headAdv=dragging? Math.hypot(head.x-prevHead.x, head.y-prevHead.y) : 0;
+
+  // 現在のなぞり線（酸の帯）＝古い所ほど薄く細く＝蒸発しかけ
+  if(dragging && path.length>1){
+    // セグメント単位で太さを変えると丸キャップが数珠状に見えるので、
+    // 経年でバンド分けして「バンド内は連続した1本」として描く
+    g.lineCap='round'; g.lineJoin='round';
+    g.shadowColor='rgba(140,240,200,.5)'; g.shadowBlur=10;
+    const BANDS=12, n=path.length;   // 多いほど太さの段差＝継ぎ目のコブが目立たない
+    for(let b=0;b<BANDS;b++){
+      const i0=Math.floor((n-1)*b/BANDS), i1=Math.floor((n-1)*(b+1)/BANDS);
+      if(i1<=i0) continue;
+      const mid=path[Math.floor((i0+i1)/2)];
+      const f=Math.max(0,Math.min(1,1-(clock-mid.t)/TRAIL_LIFE));  // 1=出来たて 0=蒸発直前
+      g.beginPath(); g.moveTo(path[i0].x,path[i0].y);
+      for(let i=i0+1;i<=i1;i++) g.lineTo(path[i].x,path[i].y);
+      if(b===BANDS-1) g.lineTo(head.x,head.y);
+      // 丸キャップは始点で前のバンドに乗り出してコブになる。先端のみ丸、継ぎ目はバット
+      g.lineCap= b===BANDS-1? 'round':'butt';
+      g.strokeStyle='rgba(140,240,200,'+(0.05+0.27*f)+')';
+      g.lineWidth=(RW+4)*(0.42+0.58*f);
+      g.stroke();
+    }
+    g.shadowBlur=0;
+  }
+
+  // シャッターの破片フラッシュ（弾けた地点の輪）
+  for(const s of shards){ s.life-=dt*2.6;
+    if(s.life>0){ g.beginPath(); g.arc(s.x,s.y,(1-s.life)*70+8,0,7);
+      g.strokeStyle='rgba(255,150,120,'+(0.6*s.life)+')'; g.lineWidth=3+6*s.life; g.stroke(); } }
+  shards=shards.filter(s=>s.life>0);
+
+  // 浮遊中の味方
+  for(const r of rods){ if(r.joined) continue;
+    // 弾け飛んだ勢い（あれば）を減衰させながら適用
+    if(r.vx||r.vy){ r.x+=r.vx; r.y+=r.vy; r.ang+=r.vr; r.vx*=0.93; r.vy*=0.93; r.vr*=0.93;
+      if(r.x<24){r.x=24;r.vx*=-0.5;} if(r.x>W-24){r.x=W-24;r.vx*=-0.5;}
+      if(r.y<90){r.y=90;r.vy*=-0.5;} if(r.y>H-110){r.y=H-110;r.vy*=-0.5;}
+      if(Math.abs(r.vx)<0.05&&Math.abs(r.vy)<0.05){r.vx=0;r.vy=0;r.vr=0;} }
+    r.phase+=dt*1.5; const wob=Math.sin(r.phase)*0.06;
+    // ★消耗中（酸を出し切った）＝くすんで拾えない。回復したら元に戻る
+    let alpha=1, weak=false;
+    if(r.spent>0){
+      r.spent-=dt; if(r.spent<0) r.spent=0;
+      if(r.spent>0){ weak=true; alpha=0.32+0.10*Math.sin(r.phase*3); }
+    }
+    if(dragging && r.spent<=0){ const d=Math.hypot(r.x-head.x,r.y-head.y);
+      if(d<CATCH_R*2.2){ const a=Math.atan2(head.y-r.y,head.x-r.x);
+        let da=a-r.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+        r.ang+= da*(1-d/(CATCH_R*2.2))*0.12; } }
+    // 餓死タイマー（弾け飛んだ菌のみ）：色はそのまま、点滅で"要救出"を示す。死が近いほど点滅が速い
+    if(r.doom>0){
+      r.doom-=dt;
+      if(r.doom<=0){ // 餓死：小さな消滅パフを残して除去
+        r.dead=true;
+        for(let i=0;i<6;i++) bits.push({x:r.x,y:r.y, vx:rnd(-0.6,0.6),vy:rnd(-0.9,0.2), life:1, r:rnd(1,2.4)});
+        continue;
+      }
+      const frac=r.doom/DOOM;                 // 1=弾けた直後 → 0=死の直前
+      const rate=6+(1-frac)*46;               // 点滅の速さ（rad/s）：残り少ないほど速く
+      r.blink=(r.blink||0)+dt*rate;
+      alpha=0.30+0.70*(0.5+0.5*Math.sin(r.blink)); // 0.30〜1.0 で明滅（元の色のまま）
+    }
+    drawRod(r.x,r.y,r.ang+wob,false,alpha,weak);
+  }
+  rods=rods.filter(r=>!r.dead);
+  // つながった味方
+  for(let k=0;k<joined.length;k++){
+    const r=joined[k];
+    // ★遅れは「xy座標」ではなく「軌跡上をどれだけ後退しているか(=r.b)」に掛ける。
+    //   xyに掛けると急カーブで内側をショートカットし、指が避けた敵に鎖だけが当たる
+    //   （実測で最大26pxのズレ＝理不尽な四散）。距離に掛ければ桿菌は常に軌跡の上に
+    //   居たまま、伸び縮みだけが残る＝線路を外さない電車やヘビと同じ動き。
+    const ideal=(joined.length-1-k+1)*SPACING;
+    if(r.b==null) r.b=ideal;
+    r.b+=headAdv;                    // 頭が進んだ分だけ相対的に後ろへ置いていかれる
+    r.b+=(ideal-r.b)*0.30;           // バネで追いつく＝加速で伸び、止まると縮む
+    if(r.b>ideal+70) r.b=ideal+70;   // 伸びすぎると指から千切れて見えるので上限
+    const tp=pointBack(r.b);
+    r.follow=Math.min(1,(r.follow==null?1:r.follow)+dt*3.5);
+    r.x+=(tp.x-r.x)*r.follow; r.y+=(tp.y-r.y)*r.follow;
+    // ★角度も軌跡に揃える。遅れを残すとカーブ中に全桿菌が同じだけ傾いて
+    //   曲線を横切る平行な斜め棒「//////」に見える（実測：接線から平均23度・最大82度）。
+    //   接線は前後14pxで取って滑らかにする（3px間隔の生セグメントだとガタつく）
+    const pf=pointBack(Math.max(0,r.b-7)), pb=pointBack(r.b+7);
+    const tdx=pf.x-pb.x, tdy=pf.y-pb.y;
+    r.ang = (Math.abs(tdx)+Math.abs(tdy) > 0.5) ? Math.atan2(tdy,tdx) : tp.ang;
+    drawRod(r.x,r.y,r.ang,true);
+  }
+
+  // 指先
+  if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
+    g.fillStyle='rgba(200,255,230,.9)'; g.shadowColor='#8ff0c0'; g.shadowBlur=16; g.fill(); g.shadowBlur=0;
+    // ★今の鎖本数＝一度に溶かせる匹数。閉じる前に足りるか判断させる
+    // 鎖に埋もれないよう、暗いバッジを敷いて指先の上に浮かせる
+    // ★指は物理的に8〜10mm＝55〜64px を覆う。30pxでは指の下に隠れるので離す。
+    //   画面上端に近い時は指の下側に回す
+    const br=17;
+    const bx=Math.max(br+4, Math.min(W-br-4, head.x));
+    const by=(head.y-56 < br+50)? head.y+56 : head.y-56;
+    g.save();
+    g.beginPath(); g.arc(bx,by,br,0,7);
+    g.fillStyle='rgba(6,14,12,.82)'; g.fill();
+    g.strokeStyle= joinedCount? 'rgba(140,250,200,.95)' : 'rgba(255,140,110,.95)';
+    g.lineWidth=2; g.stroke();
+    g.font='800 18px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillStyle= joinedCount? '#a6ffd4' : '#ff9a80';
+    g.fillText(joinedCount, bx, by+1);
+    g.restore(); g.shadowBlur=0;
+  }
+
+  g.restore(); // 画面揺れ
+  prevHead.x=head.x; prevHead.y=head.y;
+  requestAnimationFrame(loop);
+}
+resize(); scatter(); requestAnimationFrame(loop);
+window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals,path:()=>path};
+</script>
+</body>
+</html>
