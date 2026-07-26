@@ -4,58 +4,78 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>プロバイオティＸ 操作方式の比較</title>
+<title>プロバイオティＸ 実験台</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   body{background:#0b0f14;color:#eee;font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;
     min-height:100dvh;padding:calc(env(safe-area-inset-top) + 22px) 18px calc(env(safe-area-inset-bottom) + 28px);
     line-height:1.7;-webkit-text-size-adjust:100%}
   h1{font-size:19px;color:#8ff0c0;letter-spacing:.02em;margin-bottom:4px}
-  .sub{font-size:12.5px;color:#7a8a86;margin-bottom:22px}
+  .sub{font-size:12.5px;color:#7a8a86;margin-bottom:20px}
+  h2{font-size:12px;color:#6f8079;letter-spacing:.08em;margin:26px 0 10px;font-weight:700}
   a.card{display:block;text-decoration:none;color:inherit;background:#141e26;border:1px solid #24333d;
     border-radius:14px;padding:16px 17px;margin-bottom:13px}
+  a.card.dim{background:#101820;border-color:#1c2831;padding:13px 15px}
   a.card:active{background:#1b2833}
   .tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;
     padding:2px 8px;border-radius:999px;margin-bottom:7px}
   .t-new{background:#8ff0c0;color:#0b2119}
   .t-old{background:#3d4c56;color:#c8d6dc}
+  .t-no{background:#5a3b3b;color:#e8c4c4}
   .name{font-size:16.5px;font-weight:800;color:#dff7ec;margin-bottom:5px}
+  .dim .name{font-size:14px;color:#9fb3ac;margin-bottom:3px}
   .desc{font-size:12.5px;color:#93a5ac}
+  .dim .desc{font-size:11.5px;color:#6f8188}
   .desc b{color:#bfe9d2;font-weight:700}
-  .note{font-size:11.5px;color:#5f6f77;margin-top:20px;padding-top:16px;border-top:1px solid #1d2a33}
+  .note{font-size:11.5px;color:#5f6f77;margin-top:22px;padding-top:16px;border-top:1px solid #1d2a33}
 </style>
 </head>
 <body>
 <h1>プロバイオティＸ</h1>
-<div class="sub">乳酸菌の「守る」＝手触りの実験台。スマホで操作方式を比べる段階です。</div>
+<div class="sub">乳酸菌の「守る」＝手触りの実験台。<b>吸い付いて鎖が伸びる感触は共通</b>で、ルールだけが違います。</div>
 
-<a class="card" href="feel-tap.html">
-  <span class="tag t-new">案A 新しい</span>
-  <div class="name">タップで繋ぐ</div>
-  <div class="desc">桿菌を<b>順にタップ</b>して繋ぎ、最初の1本をもう一度押して輪を閉じる。指が触れるのは一瞬だけなので<b>手で盤面が隠れない</b>。腐敗菌を貫く筋は通せない＝運動精度ではなく<b>どの菌を選ぶかの判断</b>の勝負。押している間に線がプレビューされ、離して確定。</div>
+<h2>■ 新しい2案（衝突する敵がいない構造）</h2>
+
+<a class="card" href="feel-wall.html">
+  <span class="tag t-new">案1</span>
+  <div class="name">酸の壁を築く</div>
+  <div class="desc">腐敗は<b>点ではなく面</b>として全方位からじわじわ迫る。なぞって桿菌を集め、<b>指を離すとその場に定着して酸の壁</b>になり、迫る面を堰き止める。壁は食われて少しずつ減るので継ぎ足し続ける。<b>壁に隙間があると腐敗が横から染み出して裏へ回る</b>。中央の漬物が尽きるまでの秒数が記録。</div>
 </a>
 
-<a class="card" href="feel-splice.html">
-  <span class="tag t-new">案B 新しい</span>
-  <div class="name">継ぎ足しで繋ぐ</div>
-  <div class="desc">なぞる手触りは残したまま、<b>指を離しても鎖と軌跡が残る</b>。頭の周りの点線の輪の中を触り直せば続きから描ける。<b>手を上げて盤面を見直せる</b>のが要点。急かす圧（軌跡の蒸発）は外してあります。</div>
+<a class="card" href="feel-turf.html">
+  <span class="tag t-new">案3</span>
+  <div class="name">陣取り</div>
+  <div class="desc">盤面はマス目。腐敗は一定間隔で隣のマスへ広がる。集めた桿菌1本で1マスを酸性にでき、<b>腐敗のマスも塗り返せる</b>＝押し合いになる。<b>酸性の陣地から桿菌が湧く</b>ので広げるほど補給が増える。中央の糠床を全部取られたら負け。</div>
 </a>
 
-<a class="card" href="feel-seal.html">
-  <span class="tag t-old">従来</span>
-  <div class="name">ひと続きでなぞる</div>
-  <div class="desc">1回の連続ドラッグで集める→回り込む→閉じるまでやり切る方式。<b>ストレスの比較用</b>。軌跡は1.5秒で蒸発し、腐敗菌に触れると鎖は全損。</div>
-</a>
+<h2>■ 過去の実験（比較用）</h2>
 
-<a class="card" href="feel-chain.html">
-  <span class="tag t-old">最初の実験</span>
+<a class="card dim" href="feel-chain.html">
+  <span class="tag t-old">核だけ</span>
   <div class="name">磁石で吸い付く核だけ</div>
-  <div class="desc">敵もスコアも無し。桿菌が磁石のように吸い付いて鎖が伸びる手触りだけを確かめる台。</div>
+  <div class="desc">敵もルールも無し。気持ち良いと確認済みの手触りそのもの。</div>
+</a>
+
+<a class="card dim" href="feel-tap.html">
+  <span class="tag t-no">却下</span>
+  <div class="name">タップで繋ぐ</div>
+  <div class="desc">なぞりを捨てて桿菌を順にタップする案。手触りが素っ気ない。</div>
+</a>
+
+<a class="card dim" href="feel-splice.html">
+  <span class="tag t-no">却下</span>
+  <div class="name">継ぎ足しで繋ぐ</div>
+  <div class="desc">指を離しても鎖が残る案。まだ手が邪魔だった。</div>
+</a>
+
+<a class="card dim" href="feel-seal.html">
+  <span class="tag t-no">却下</span>
+  <div class="name">ひと続きでなぞって囲む</div>
+  <div class="desc">点の敵を避けながら囲む方式。狭い画面で避けられずストレスの原因になった版。</div>
 </a>
 
 <div class="note">
-  共通のルール：<b>繋いだ本数＝一度に溶かせる腐敗菌の数</b>。足りないと耐えられます（琥珀色の封印＋赤く光る生存個体）。<br>
-  案A・案Bはどちらも比較に集中するため、酸の消費（消耗して暫く拾えない）は入れていません。
+  案1と案3は、<b>ぶつかって即座に失う要素を無くしてあります</b>。腐敗は面／マスとして押してくるので、避ける対象がありません。ミスは「壁が薄い」「陣地が削られる」という<b>劣化</b>として現れます。
 </div>
 </body>
 </html>

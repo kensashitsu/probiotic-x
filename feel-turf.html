@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>陣取り 実験</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;color:#eee;
+    touch-action:none;overscroll-behavior:none}
+  canvas{position:absolute;inset:0;width:100%;height:100dvh;display:block}
+  #hud{position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:0;right:0;text-align:center;
+    pointer-events:none;z-index:5}
+  #hud .row{font-size:13px;color:#bfe9d2;letter-spacing:.03em}
+  #hud .row b{font-size:23px;color:#8ff0c0;font-weight:800}
+  #hud .best{font-size:11.5px;color:#7a8a86;margin-top:1px}
+  .btn{position:absolute;top:calc(env(safe-area-inset-top) + 10px);
+    font:inherit;font-size:12px;font-weight:700;color:#0b0f14;background:#8ff0c0;border:0;border-radius:999px;
+    padding:7px 14px;z-index:6}
+  #reset{right:12px}
+  #tip{position:absolute;top:calc(env(safe-area-inset-top) + 68px);left:0;right:0;text-align:center;
+    font-size:12px;line-height:1.5;color:#6f7d84;padding:0 16px;z-index:5;pointer-events:none;transition:opacity .4s}
+  #over{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
+    background:rgba(8,12,16,.86);z-index:10;text-align:center;padding:20px}
+  #over.on{display:flex}
+  #over .t{font-size:22px;font-weight:800;color:#ff9a80;margin-bottom:6px}
+  #over .s{font-size:14px;color:#bfe9d2;margin-bottom:20px;line-height:1.8}
+  #over button{font:inherit;font-size:15px;font-weight:800;color:#0b0f14;background:#8ff0c0;border:0;
+    border-radius:999px;padding:12px 26px}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud">
+  <div class="row">酸性の陣地 <b id="own">0</b> マス</div>
+  <div class="best" id="best"></div>
+</div>
+<div id="tip">なぞって桿菌を集め 離すと通った筋のマスが酸性になる。腐敗のマスも塗り返せる</div>
+<button id="reset" class="btn">やり直す</button>
+<div id="over">
+  <div class="t">糠床が腐敗に覆われた</div>
+  <div class="s" id="overS"></div>
+  <button id="again">もう一度</button>
+</div>
+
+<script>
+'use strict';
+// ============================================================
+//  案3「陣取り」
+//  ・盤面はマス目。腐敗は一定間隔で隣へ広がる"面"＝ぶつかる対象が無い。
+//  ・集めた桿菌1本で1マスを酸性化。腐敗のマスも塗り返せる＝押し合いになる。
+//  ・酸性の陣地から桿菌が湧く＝広げるほど補給が増える経済がある。
+//  ・中央の糠床(2x2)を全部取られたら負け。
+// ============================================================
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const elOwn=document.getElementById('own'), elBest=document.getElementById('best');
+let W,H,DPR;
+
+const SCALE=1.25;
+const RLEN=15*SCALE, RW=6.2*SCALE;
+const SPACING=15.5*SCALE;
+const CATCH_R=40*SCALE;
+
+const CELL=42;
+const PLAY_TOP=96;
+function playBot(){ return H-34; }
+
+const TICK=1.35;            // 腐敗が広がる間隔(秒)
+// ★1tickに腐敗が奪える空きマスは"上限で"管理する。確率方式だと前線の広さに
+//   比例して増えるため暴走した（0.55で7秒/0.14で25秒で全滅。プレイヤーの補給は
+//   毎tick約2.5本なので勝ち目がない）。上限方式なら前線が広がっても一定
+function rotPerTick(){ return 2+Math.floor(elapsed/25); }
+const CHEW=0.25;            // 酸性マスを削る量(隣接する腐敗1つあたり/tick)
+                            // 隣接1つなら4tick、2つなら2tickで陥落
+const HOME_HP=3;            // 糠床の硬さ
+const FREE_MAX=34, SPAWN_BASE=0.85;
+
+const N=0, ACID=1, ROT=2;
+let cols=0, rows=0, ox=0, oy=0;
+let cell=[];                // {s,hp,home,flash}
+let free=[], bits=[];
+let best=+(localStorage.getItem('turfBest')||0);
+let tickT=0, spawnT=0, clock=0, alive=true, elapsed=0, shake=0, pulse=0;
+
+function rnd(a,b){return a+Math.random()*(b-a);}
+function idx(c,r){ return r*cols+c; }
+function inGrid(c,r){ return c>=0&&c<cols&&r>=0&&r<rows; }
+function cellCenter(c,r){ return {x:ox+c*CELL+CELL/2, y:oy+r*CELL+CELL/2}; }
+function cellAt(x,y){
+  const c=Math.floor((x-ox)/CELL), r=Math.floor((y-oy)/CELL);
+  return inGrid(c,r)? {c,r}: null;
+}
+
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=cv.clientWidth; H=cv.clientHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  g.setTransform(DPR,0,0,DPR,0,0);
+  cols=Math.max(5,Math.floor(W/CELL));
+  rows=Math.max(7,Math.floor((playBot()-PLAY_TOP)/CELL));
+  ox=Math.round((W-cols*CELL)/2);
+  oy=Math.round(PLAY_TOP+((playBot()-PLAY_TOP)-rows*CELL)/2);
+}
+window.addEventListener('resize',()=>{resize();reset();});
+
+function reset(){
+  resize();
+  cell=new Array(cols*rows);
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const edge=(c===0||r===0||c===cols-1||r===rows-1);
+    cell[idx(c,r)]={s:edge?ROT:N, hp:1, home:false, flash:0};
+  }
+  // 中央2x2＝糠床（守る対象・硬い）
+  const hc=Math.floor(cols/2)-1, hr=Math.floor(rows/2)-1;
+  for(let r=hr;r<=hr+1;r++)for(let c=hc;c<=hc+1;c++){
+    if(!inGrid(c,r)) continue;
+    const q=cell[idx(c,r)]; q.s=ACID; q.hp=HOME_HP; q.home=true;
+  }
+  free=[]; bits=[]; chain=[]; path=[]; dragging=false;
+  tickT=0; spawnT=0; alive=true; elapsed=0; shake=0; pulse=0;
+  for(let i=0;i<12;i++) spawnFree();
+  document.getElementById('over').classList.remove('on');
+  document.getElementById('tip').style.opacity=1;
+  updateHud();
+}
+function ownCount(){ let n=0; for(const q of cell) if(q.s===ACID) n++; return n; }
+function updateHud(){
+  elOwn.textContent=ownCount();
+  elBest.textContent=(best? 'これまで最長 '+best+' 秒 ／ ':'')+'守った '+Math.floor(elapsed)+' 秒';
+}
+function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
+
+// 桿菌は酸性の陣地から湧く（広げるほど補給が増える）
+function spawnFree(){
+  if(free.length>=FREE_MAX) return;
+  const spots=[];
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(cell[idx(c,r)].s===ACID) spots.push([c,r]);
+  if(!spots.length) return;
+  const [c,r]=spots[Math.floor(Math.random()*spots.length)];
+  const p=cellCenter(c,r);
+  free.push({x:p.x+rnd(-13,13), y:p.y+rnd(-13,13), ang:Math.random()*Math.PI,
+             phase:Math.random()*6.28, joined:false});
+}
+
+// ---------------- 腐敗の広がり ----------------
+function rotTick(){
+  pulse=1;
+  const cand=new Set(), dmg=new Map();
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    if(cell[idx(c,r)].s!==ROT) continue;
+    const nb=[[c+1,r],[c-1,r],[c,r+1],[c,r-1]];
+    for(const [nc,nr] of nb){
+      if(!inGrid(nc,nr)) continue;
+      const q=cell[idx(nc,nr)];
+      if(q.s===N) cand.add(idx(nc,nr));
+      else if(q.s===ACID) dmg.set(idx(nc,nr),(dmg.get(idx(nc,nr))||0)+CHEW);
+    }
+  }
+  // 前線の空きマスから上限数だけ無作為に奪う
+  const list=Array.from(cand);
+  for(let i=list.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [list[i],list[j]]=[list[j],list[i]]; }
+  for(const i of list.slice(0,rotPerTick())){ const q=cell[i]; q.s=ROT; q.flash=1; }
+  for(const [i,d] of dmg){
+    const q=cell[i]; q.hp-=d;
+    if(q.hp<=0){
+      q.s=ROT; q.hp=1; q.flash=1;
+      const c=i%cols, r=Math.floor(i/cols), p=cellCenter(c,r);
+      for(let k=0;k<6;k++) bits.push({x:p.x,y:p.y,vx:rnd(-1.1,1.1),vy:rnd(-1.3,.3),life:1,r:rnd(1,2.6),warm:true});
+      shake=Math.max(shake,2.5); crumbleSnd();
+      if(q.home){ q.home=false; homeLost(); }
+    }
+  }
+  // 糠床が全滅したら負け
+  let homes=0; for(const q of cell) if(q.home) homes++;
+  if(homes===0 && alive) lose();
+  updateHud();
+}
+function homeLost(){ tipMsg('糠床が削られた！ 塗り返せ'); }
+function lose(){
+  alive=false; dragging=false;
+  const s=Math.floor(elapsed);
+  if(s>best){ best=s; localStorage.setItem('turfBest',best); }
+  document.getElementById('overS').innerHTML='守った時間 <b>'+s+' 秒</b><br>これまで最長 '+best+' 秒';
+  document.getElementById('over').classList.add('on');
+  loseSnd();
+}
+
+// ---------------- 集める ----------------
+let dragging=false, path=[], chain=[], orderSeq=0;
+let head={x:0,y:0}, prevHead={x:0,y:0};
+function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function start(x,y){ dragging=true; path=[{x,y}]; head={x,y}; prevHead={x,y}; ac(); catchNear(x,y); }
+function moveTo(x,y){
+  if(!dragging||!alive) return;
+  const last=path[path.length-1];
+  if(Math.hypot(x-last.x,y-last.y)>3){ path.push({x,y}); if(path.length>400)path.shift(); }
+  head={x,y}; catchNear(x,y);
+}
+function catchNear(x,y){
+  for(const r of free){
+    if(r.joined) continue;
+    if(Math.hypot(r.x-x,r.y-y)<=CATCH_R){
+      r.joined=true; r.order=orderSeq++; r.b=null; r.follow=0.30;
+      chain.push(r); pop(chain.length);
+    }
+  }
+}
+// なぞった筋のマスを、集めた本数分だけ酸性にする（新しい方＝頭側から順に）
+function claimTargets(){
+  const out=[], seen=new Set();
+  const lim=chain.length;
+  if(lim===0) return out;
+  for(let i=path.length-1;i>=0 && out.length<lim;i--){
+    const q=cellAt(path[i].x,path[i].y);
+    if(!q) continue;
+    const k=idx(q.c,q.r);
+    if(seen.has(k)) continue;
+    const t=cell[k];
+    if(t.s===ACID && !t.home && t.hp>=1) continue;   // 既に自分の陣地は飛ばす
+    seen.add(k); out.push({c:q.c,r:q.r,k});
+  }
+  return out;
+}
+function release(){
+  dragging=false;
+  if(chain.length===0){ path=[]; return; }
+  const tg=claimTargets();
+  let n=0, retaken=0;
+  for(const t of tg){
+    const q=cell[t.k];
+    if(q.s===ROT) retaken++;
+    q.s=ACID; q.hp=q.home? HOME_HP : 1; q.flash=1;
+    const p=cellCenter(t.c,t.r);
+    for(let k=0;k<4;k++) bits.push({x:p.x+rnd(-14,14),y:p.y+rnd(-14,14),vx:rnd(-.5,.5),vy:rnd(-.7,.1),life:1,r:rnd(1,2.2)});
+    n++;
+  }
+  free=free.filter(r=>!r.joined);
+  chain=[]; path=[]; orderSeq=0;
+  claimSnd(n,retaken);
+  if(n===0) tipMsg('筋に塗れるマスが無かった（既に酸性）');
+  else if(retaken>0) tipMsg(retaken+'マス 塗り返した！');
+  updateHud();
+}
+cv.addEventListener('mousedown',e=>{if(!alive)return;const p=pos(e);start(p.x,p.y);});
+cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
+window.addEventListener('mouseup',()=>{if(dragging)release();});
+cv.addEventListener('touchstart',e=>{e.preventDefault();if(!alive)return;const p=pos(e.changedTouches[0]);start(p.x,p.y);},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);moveTo(p.x,p.y);},{passive:false});
+cv.addEventListener('touchend',e=>{e.preventDefault();if(dragging)release();},{passive:false});
+cv.addEventListener('touchcancel',e=>{e.preventDefault();if(dragging)release();},{passive:false});
+document.getElementById('reset').addEventListener('click',reset);
+document.getElementById('again').addEventListener('click',reset);
+
+// ---------------- 音 ----------------
+let A=null;
+function ac(){ if(!A){ try{A=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(A&&A.state==='suspended')A.resume(); }
+function pop(n){ if(!A)return; try{
+  const t=A.currentTime, o=A.createOscillator(), gg=A.createGain();
+  const base=520+Math.min(n,40)*26;
+  o.type='sine'; o.frequency.setValueAtTime(base,t); o.frequency.exponentialRampToValueAtTime(base*1.5,t+0.05);
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.18,t+0.008); gg.gain.exponentialRampToValueAtTime(0.0001,t+0.13);
+  o.connect(gg).connect(A.destination); o.start(t); o.stop(t+0.16);
+}catch(e){} }
+function claimSnd(n,retaken){ if(!A)return; try{
+  const t=A.currentTime;
+  const dur=0.2+Math.min(n,10)*0.02;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate), ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.frequency.setValueAtTime(1500,t); bp.frequency.exponentialRampToValueAtTime(500,t+dur); bp.Q.value=0.9;
+  const gg=A.createGain(); gg.gain.setValueAtTime(0.22,t); gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+  const chord=(retaken>0? 560:470)+Math.min(n,20)*16;
+  [0,4,7].slice(0,1+Math.min(n,2)).forEach((iv,k)=>{
+    const o=A.createOscillator(), og=A.createGain();
+    o.type='triangle'; o.frequency.value=chord*Math.pow(2,iv/12);
+    og.gain.setValueAtTime(0.0001,t+k*0.03); og.gain.exponentialRampToValueAtTime(0.11,t+0.02+k*0.03); og.gain.exponentialRampToValueAtTime(0.0001,t+0.28+k*0.03);
+    o.connect(og).connect(A.destination); o.start(t+k*0.03); o.stop(t+0.32+k*0.03); });
+}catch(e){} }
+function crumbleSnd(){ if(!A)return; try{
+  const t=A.currentTime, dur=0.16;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate), ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1100;
+  const gg=A.createGain(); gg.gain.setValueAtTime(0.06,t); gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(lp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+}catch(e){} }
+function loseSnd(){ if(!A)return; try{
+  const t=A.currentTime, o=A.createOscillator(), og=A.createGain();
+  o.type='sawtooth'; o.frequency.setValueAtTime(300,t); o.frequency.exponentialRampToValueAtTime(70,t+0.9);
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.14,t+0.03); og.gain.exponentialRampToValueAtTime(0.0001,t+1.0);
+  o.connect(og).connect(A.destination); o.start(t); o.stop(t+1.05);
+}catch(e){} }
+
+// ---------------- 鎖の追従 ----------------
+function pointBack(d){
+  let acc=0;
+  for(let i=path.length-1;i>0;i--){
+    const a=path[i], b=path[i-1];
+    const seg=Math.hypot(a.x-b.x,a.y-b.y);
+    if(acc+seg>=d){ const t=(d-acc)/Math.max(0.001,seg);
+      return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}; }
+    acc+=seg;
+  }
+  const p=path[0]||head; return {x:p.x,y:p.y};
+}
+
+// ---------------- 描画 ----------------
+function roundRect(x,y,w,h,r){
+  g.beginPath();
+  g.moveTo(x+r,y); g.lineTo(x+w-r,y); g.quadraticCurveTo(x+w,y,x+w,y+r);
+  g.lineTo(x+w,y+h-r); g.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  g.lineTo(x+r,y+h); g.quadraticCurveTo(x,y+h,x,y+h-r);
+  g.lineTo(x,y+r); g.quadraticCurveTo(x,y,x+r,y); g.closePath();
+}
+function drawRod(x,y,ang,mode){
+  g.save(); g.translate(x,y); g.rotate(ang);
+  if(mode==='chain'){ g.shadowColor='rgba(140,240,200,.9)'; g.shadowBlur=10; g.fillStyle='#c8ffe6'; g.strokeStyle='rgba(120,235,190,.9)'; }
+  else { g.fillStyle='#dfeef0'; g.strokeStyle='rgba(120,150,160,.5)'; }
+  g.lineWidth=1;
+  const h=RLEN/2, w=RW/2;
+  g.beginPath(); g.arc(-h,0,w,Math.PI/2,Math.PI*1.5); g.arc(h,0,w,-Math.PI/2,Math.PI/2); g.closePath();
+  g.fill(); g.stroke(); g.restore(); g.shadowBlur=0;
+}
+let tms=0;
+function loop(ts){
+  const dt=Math.min(0.05,(tms?ts-tms:16)/1000); tms=ts; clock+=dt;
+  if(alive){
+    elapsed+=dt;
+    tickT+=dt; if(tickT>=TICK){ tickT-=TICK; rotTick(); }
+    spawnT+=dt;
+    const rate=SPAWN_BASE/Math.max(1,Math.sqrt(ownCount()));   // 陣地が広いほど速く湧く
+    if(spawnT>=rate){ spawnT=0; spawnFree(); }
+  }
+  if(pulse>0) pulse-=dt*2.2;
+
+  g.save();
+  if(shake>0.2){ const s=shake; g.translate(rnd(-s,s),rnd(-s,s)); shake*=0.86; } else shake=0;
+  g.clearRect(-40,-40,W+80,H+80);
+  g.fillStyle='#0b0f14'; g.fillRect(-40,-40,W+80,H+80);
+
+  // マス
+  const claim=dragging? claimTargets():[];
+  const claimSet=new Set(claim.map(t=>t.k));
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const q=cell[idx(c,r)];
+    const x=ox+c*CELL, y=oy+r*CELL;
+    if(q.flash>0) q.flash-=dt*2.4;
+    if(q.s===ROT){
+      roundRect(x+1.5,y+1.5,CELL-3,CELL-3,7);
+      const gr=g.createLinearGradient(x,y,x+CELL,y+CELL);
+      gr.addColorStop(0,'rgba(150,70,105,.95)'); gr.addColorStop(1,'rgba(96,40,68,.95)');
+      g.fillStyle=gr; g.fill();
+      if(q.flash>0){ g.strokeStyle='rgba(255,150,190,'+(0.8*q.flash)+')'; g.lineWidth=2.5; g.stroke(); }
+    }else if(q.s===ACID){
+      roundRect(x+1.5,y+1.5,CELL-3,CELL-3,7);
+      const k=q.home? 1:Math.max(0.2,Math.min(1,q.hp));
+      g.fillStyle= q.home? 'rgba(214,232,150,.9)' : 'rgba(120,225,180,'+(0.30+0.45*k)+')';
+      g.fill();
+      g.strokeStyle= q.home? 'rgba(240,250,205,.8)':'rgba(150,245,205,'+(0.35+0.4*k)+')';
+      g.lineWidth=q.home?2.5:1.5; g.stroke();
+      if(!q.home && q.hp<1){   // 削られかけを斜線で示す
+        g.save(); roundRect(x+1.5,y+1.5,CELL-3,CELL-3,7); g.clip();
+        g.strokeStyle='rgba(255,140,120,.5)'; g.lineWidth=2;
+        for(let k2=-CELL;k2<CELL;k2+=8){ g.beginPath(); g.moveTo(x+k2,y); g.lineTo(x+k2+CELL,y+CELL); g.stroke(); }
+        g.restore();
+      }
+    }else{
+      roundRect(x+3,y+3,CELL-6,CELL-6,6);
+      g.fillStyle='rgba(28,40,50,.55)'; g.fill();
+    }
+    if(claimSet.has(idx(c,r))){    // これから塗るマス
+      roundRect(x+1,y+1,CELL-2,CELL-2,8);
+      g.strokeStyle='rgba(180,255,220,.95)'; g.lineWidth=3; g.stroke();
+    }
+  }
+  // 腐敗が広がる拍動
+  if(pulse>0){
+    g.strokeStyle='rgba(230,140,180,'+(0.35*pulse)+')'; g.lineWidth=3;
+    g.strokeRect(ox-3,oy-3,cols*CELL+6,rows*CELL+6);
+  }
+
+  for(const b of bits){ b.x+=b.vx; b.y+=b.vy; b.vy+=0.05; b.life-=dt*1.6;
+    if(b.life>0){ g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7);
+      g.fillStyle=b.warm? 'rgba(255,170,140,'+(0.7*b.life)+')':'rgba(160,245,200,'+(0.7*b.life)+')'; g.fill(); } }
+  bits=bits.filter(b=>b.life>0);
+
+  for(const r of free){ if(r.joined) continue;
+    r.phase+=dt*1.5;
+    if(dragging){ const d=Math.hypot(r.x-head.x,r.y-head.y);
+      if(d<CATCH_R*2.2){ const a=Math.atan2(head.y-r.y,head.x-r.x);
+        let da=a-r.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+        r.ang+=da*(1-d/(CATCH_R*2.2))*0.12; } }
+    drawRod(r.x,r.y,r.ang+Math.sin(r.phase)*0.06,'free');
+  }
+
+  if(dragging && path.length>1){
+    g.beginPath(); g.moveTo(path[0].x,path[0].y);
+    for(let i=1;i<path.length;i++) g.lineTo(path[i].x,path[i].y);
+    g.lineTo(head.x,head.y);
+    g.strokeStyle='rgba(140,240,200,.18)'; g.lineWidth=RW+4; g.lineCap='round'; g.lineJoin='round'; g.stroke();
+  }
+  const headAdv=dragging? Math.hypot(head.x-prevHead.x, head.y-prevHead.y):0;
+  const sorted=chain.slice().sort((a,b)=>a.order-b.order);
+  for(let k=0;k<sorted.length;k++){
+    const r=sorted[k], ideal=(sorted.length-1-k+1)*SPACING;
+    if(r.b==null) r.b=ideal;
+    r.b+=headAdv; r.b+=(ideal-r.b)*0.30;
+    if(r.b>ideal+70) r.b=ideal+70;
+    const tp=pointBack(r.b);
+    r.follow=Math.min(1,(r.follow==null?1:r.follow)+dt*3.5);
+    r.x+=(tp.x-r.x)*r.follow; r.y+=(tp.y-r.y)*r.follow;
+    const pf=pointBack(Math.max(0,r.b-7)), pb=pointBack(r.b+7);
+    const tdx=pf.x-pb.x, tdy=pf.y-pb.y;
+    if(Math.abs(tdx)+Math.abs(tdy)>0.5) r.ang=Math.atan2(tdy,tdx);
+    drawRod(r.x,r.y,r.ang,'chain');
+  }
+  if(dragging){
+    g.beginPath(); g.arc(head.x,head.y,7,0,7);
+    g.fillStyle='rgba(200,255,230,.9)'; g.shadowColor='#8ff0c0'; g.shadowBlur=16; g.fill(); g.shadowBlur=0;
+    if(chain.length>0){
+      g.save(); g.font='800 18px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+      const bx=head.x, by=head.y-52;
+      g.beginPath(); g.arc(bx,by,17,0,7); g.fillStyle='rgba(6,14,12,.82)'; g.fill();
+      g.strokeStyle='rgba(140,250,200,.95)'; g.lineWidth=2; g.stroke();
+      g.fillStyle='#a6ffd4'; g.fillText(chain.length,bx,by+1); g.restore();
+    }
+  }
+  prevHead.x=head.x; prevHead.y=head.y;
+  g.restore();
+  requestAnimationFrame(loop);
+}
+reset(); requestAnimationFrame(loop);
+window.__dbg={cell:()=>cell,dims:()=>({cols,rows,ox,oy,CELL}),free:()=>free,chain:()=>chain,
+  own:()=>ownCount(),alive:()=>alive,elapsed:()=>elapsed,
+  count:()=>{let a=0,r=0,n=0;for(const q of cell){if(q.s===1)a++;else if(q.s===2)r++;else n++;}return{acid:a,rot:r,neutral:n};},
+  homes:()=>{let h=0;for(const q of cell) if(q.home)h++;return h;},
+  tick:()=>rotTick()};
+</script>
+</body>
+</html>
