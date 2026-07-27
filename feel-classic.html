@@ -28,7 +28,7 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="hud"><div class="n">封じた <b id="cnt">0</b></div><div class="best" id="best"></div></div>
-<div id="tip">なぞって乳酸菌（球菌）を繋ぎ 腐敗菌（桿菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
+<div id="tip">なぞって乳酸菌を繋ぎ 腐敗菌（鞭毛の桿菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
 <button id="reset">まき直す</button>
 
 <script>
@@ -50,13 +50,18 @@ window.addEventListener('resize',resize);
 // ============================================================
 // ★実機（4.7インチ=375x667）だと桿菌が2.3mmしかなく小さいので一括で拡大する。
 //   見づらい/大きすぎる場合はこの1つだけ触れば全体が揃って変わる
-// ★味方＝球菌（ロイコノストック等・鎖状に連なるのは球菌が典型）
-//   敵＝桿菌（軟腐病菌・シュードモナス等。腐敗菌はほぼ全て桿菌で鞭毛で泳ぐ）
-//   ?look=old で以前の見た目（味方=桿菌 / 敵=トゲの胞子塊）に戻せる
-const LOOK=(new URLSearchParams(location.search).get('look')==='old')?'old':'new';
+// ★見た目は味方・敵を独立に切り替えられる
+//   既定＝味方は桿菌（この手触りが一番良いとユーザー判断）／敵は鞭毛で泳ぐ桿菌。
+//   味方は白〜ミントで鞭毛なし、敵はピンクで鞭毛あり＝色と付属器官で区別する。
+//   ?player=cocci で味方を球菌に ／ ?foe=blob で敵を以前のトゲの胞子塊に
+//   ?look=old は両方まとめて以前の見た目にする近道
+const _q=new URLSearchParams(location.search);
+const _old=_q.get('look')==='old';
+const PLAYER_SHAPE=(_q.get('player')==='cocci')?'cocci':'rod';
+const FOE_SHAPE=(_old||_q.get('foe')==='blob')?'blob':'rod';
 const SCALE=1.25;
 const RLEN=15*SCALE, RW=6.2*SCALE;   // 桿菌の長さ・太さ
-const SPACING=(LOOK==='new'? 10.2:15.5)*SCALE;   // 鎖の玉間隔（球菌は詰める）
+const SPACING=(PLAYER_SHAPE==='cocci'? 10.2:15.5)*SCALE;   // 鎖の玉間隔（球菌は詰める）
 const CATCH_R=40*SCALE;              // 吸い付く射程
 const FOE_R=13*SCALE;                // 腐敗菌の半径
 
@@ -227,7 +232,7 @@ const HIT_MODE=(new URLSearchParams(location.search).get('hit')==='all')?'all':'
 // ★桿菌は細長いので、当たりも円ではなくカプセル（線分からの距離）で取る。
 //   円のままだと半径26pxになり「見た目では触れていないのに弾ける」が起きる
 function foeDist(px,py,f){
-  if(LOOK!=='new') return Math.hypot(px-f.x,py-f.y)-f.r;
+  if(FOE_SHAPE!=='rod') return Math.hypot(px-f.x,py-f.y)-f.r;
   const sh=foeShape(f), ang=sh.ang, L=sh.L, Wd=sh.Wd;
   const ax=f.x-Math.cos(ang)*L/2, ay=f.y-Math.sin(ang)*L/2;
   const bx=f.x+Math.cos(ang)*L/2, by=f.y+Math.sin(ang)*L/2;
@@ -377,7 +382,7 @@ function drawRod(x,y,ang,joined,alpha,weak){
   // weak=餓死しかけ＝退色（乳白→くすんだ灰）
   g.fillStyle=joined? '#c8ffe6' : (weak? '#9aa0a0' : '#dfeef0');
   g.strokeStyle=joined? 'rgba(120,235,190,.9)':'rgba(120,150,160,.5)'; g.lineWidth=1;
-  if(LOOK==='new'){
+  if(PLAYER_SHAPE==='cocci'){
     // 球菌：1個ずつ数えられる数珠つなぎになる
     const R=RW*(joined?0.92:1.02);
     g.beginPath(); g.arc(0,0,R,0,7); g.fill(); g.stroke();
@@ -437,7 +442,7 @@ function drawFoeRod(f,warn){
   }
 }
 function drawFoe(f,warn){
-  if(LOOK==='new'){ drawFoeRod(f,warn); return; }
+  if(FOE_SHAPE==='rod'){ drawFoeRod(f,warn); return; }
   g.save(); g.translate(f.x,f.y); g.rotate(f.phase*0.3);
   const scale = f.dead ? Math.max(0,1-f.dt*3) : 1;
   const alpha = f.dead ? Math.max(0,1-f.dt*3) : 1;
