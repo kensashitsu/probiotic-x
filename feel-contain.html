@@ -41,7 +41,7 @@
   <div class="sm" id="sm"></div>
 </div>
 <div id="bar"><div id="barIn"></div></div>
-<div id="tip">なぞって乳酸菌を集め 腐敗菌を輪で囲め。触れても何も起きない ─ 恐いのは増えること</div>
+<div id="tip">なぞって乳酸菌を集め 腐敗菌を輪で囲め。触れても無害 ─ 酸に晒し続ければ鎮まる</div>
 <button id="reset" class="btn">やり直す</button>
 <div id="over">
   <div class="t">腐敗菌に埋め尽くされた</div>
@@ -58,6 +58,12 @@
 //  ・球菌(乳酸菌)で輪を作ると内側が酸性になり、中の桿菌は増殖が止まる（死なない）。
 //  ・酸は中和されて薄れる → また増え始める → 塗り直す。
 //  ・集めた球菌の数 ÷ 輪の周長 = 酸の濃さ = 効き目の持続時間。
+//  ・★短時間なら止まるだけだが、低pHに晒され続けると弱って死ぬ（非解離型の乳酸が
+//    細胞内に入り代謝を壊す＝長時間では殺菌的に働く）。これが無いと"一時停止"に
+//    しかならず、プレイヤーは決して盛り返せない＝抑えている実感が生まれなかった。
+//  ・★乳酸菌も分裂して増える。自分が作った酸性領域は乳酸菌の縄張りなので、
+//    輪の球菌がそこで増える＝抑制と同時に増殖工場を作ることになる。
+//    これが無いと1つの輪に24秒分の供給を使い切り、9秒で倍増する腐敗菌に勝てない。
 // ============================================================
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elSec=document.getElementById('sec'), elSm=document.getElementById('sm'), elBar=document.getElementById('barIn');
@@ -72,21 +78,32 @@ const ROD_L=17*SCALE, ROD_W=6.0*SCALE;
 const PLAY_TOP=104;
 function playBot(){ return H-30; }
 
-const DIV_T=9.0;
+const DIV_T=13.0;        // 腐敗菌の倍加時間。経済を立ち上げる猶予が要る
 const DIV_JIT=0.35;
-const ROD_START=5;
-const LOSE_N=90;
+const ROD_START=4;
+const LOSE_N=100;
 const ROD_SPEED=7;
-const COVER=22;
-const LIFE_BASE=15;
+const COVER=28;          // 球菌1個が受け持つ輪の長さ。大きいほど輪が安く作れる
+const LIFE_BASE=18;
 const LIFE_MAX=42;
-const COC_MAX=48;
-const COC_SPAWN=1.4;
+const COC_MAX=80;
+const COC_SPAWN=1.2;      // どこにも領域が無い時の湧き（立ち上げと詰み防止）
+// ★外から雑菌が入り続ける（実際の発酵現場でも常に起きること）。
+//   これが無いと全滅させた時点でやることが無くなる。時間とともに侵入が激しくなる
+const INVADE0=10.0;       // 最初の侵入間隔(秒)
+const INVADE_MIN=2.6;
+const INVADE_RAMP=0.085;  // 1秒ごとに間隔が縮む量
+function invadeInterval(){ return Math.max(INVADE_MIN, INVADE0-elapsed*INVADE_RAMP); }
+const BREED=0.11;         // 輪の球菌1個あたりの増殖速度(/秒)。倍加約6.3秒。
+                          // 腐敗菌の倍加13秒より速い＝上手く回せば押し返せる
 const MIN_AREA=2200;
+const KILL_T=7.0;         // 酸に晒され続けて死ぬまでの秒数
+// 成立ライン：球菌8個・半径40pxの輪 → 濃さ0.89 → 持続16秒 ≥ 7秒 で確実に鎮まる
+const RELIEF=0.22;        // 酸から出た時に回復する速さ(/秒)
 
 let rods=[], cocci=[], zones=[], bits=[];
 let best=+(localStorage.getItem('containBest')||0);
-let elapsed=0, clock=0, alive=true, shake=0, hudT=0, cocT=0;
+let elapsed=0, clock=0, alive=true, shake=0, hudT=0, cocT=0, quelled=0, invT=0;
 
 function rnd(a,b){return a+Math.random()*(b-a);}
 function resize(){
@@ -99,7 +116,7 @@ window.addEventListener('resize',resize);
 
 function addRod(x,y){
   rods.push({x,y,ang:Math.random()*Math.PI*2, div:DIV_T*rnd(1-DIV_JIT,1+DIV_JIT),
-             phase:Math.random()*6.28, split:0, born:1, held:false});
+             phase:Math.random()*6.28, split:0, born:1, held:false, stress:0});
 }
 function addCoccus(x,y){
   if(cocci.length>=COC_MAX) return;
@@ -109,7 +126,7 @@ function addCoccus(x,y){
 function reset(){
   resize();
   rods=[]; cocci=[]; zones=[]; bits=[];
-  elapsed=0; alive=true; shake=0; hudT=0; cocT=0;
+  elapsed=0; alive=true; shake=0; hudT=0; cocT=0; quelled=0; invT=0;
   for(let i=0;i<ROD_START;i++) addRod(rnd(50,W-50), rnd(PLAY_TOP+40, playBot()-40));
   for(let i=0;i<16;i++) addCoccus();
   chain=[]; path=[]; dragging=false; orderSeq=0;
@@ -120,7 +137,7 @@ function reset(){
 function updateHud(){
   elSec.textContent=Math.floor(elapsed);
   const held=rods.filter(r=>r.held).length;
-  elSm.textContent='腐敗菌 '+rods.length+' / '+LOSE_N+'　抑えている '+held+'　乳酸菌 '+cocci.filter(c=>!c.joined).length;
+  elSm.textContent='腐敗菌 '+rods.length+'/'+LOSE_N+'　抑制中 '+held+'　鎮めた '+quelled;
   elBar.style.width=Math.min(100, rods.length/LOSE_N*100).toFixed(1)+'%';
 }
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
@@ -222,16 +239,19 @@ function makeZone(poly){
   const dens=(n*COVER)/Math.max(1,per);          // 酸の濃さ
   const life=Math.min(LIFE_MAX, LIFE_BASE*dens);
   const beads=beadsOn(poly,n);
-  zones.push({poly, life, life0:life, dens, beads, flash:1});
+  zones.push({poly, life, life0:life, dens, beads, flash:1, prod:0});
   // 使った球菌は輪に消費される
   for(const c of chain){ const i=cocci.indexOf(c); if(i>=0) cocci.splice(i,1); }
   chain=[]; orderSeq=0;
   let caught=0;
   for(const r of rods) if(pointInPoly(r.x,r.y,poly)) caught++;
   sealSnd(n,dens);
-  if(dens<0.55) tipMsg('酸が薄い！ 輪が大きすぎる（'+n+'個で周長'+Math.round(per)+'px）');
+  if(life<KILL_T) tipMsg('酸が薄い！ '+Math.round(life)+'秒しか保たない（'+Math.round(KILL_T)+'秒で鎮まる）─ もっと小さく囲め');
   else if(caught===0) tipMsg('腐敗菌を囲めていない');
-  else tipMsg(caught+'匹の増殖を止めた（約'+Math.round(life)+'秒）');
+  else{
+    const canKill = life>=KILL_T;
+    tipMsg(caught+'匹を封じ込めた（酸は約'+Math.round(life)+'秒）'+(canKill? '　このまま鎮まる':'　※'+Math.round(KILL_T)+'秒未満だと鎮めきれない'));
+  }
   updateHud();
 }
 cv.addEventListener('mousedown',e=>{if(!alive)return;const p=pos(e);start(p.x,p.y);});
@@ -262,7 +282,13 @@ function update(dt){
     for(const z of zones){ if(pointInPoly(r.x,r.y,z.poly)){ r.held=true; break; } }
     if(r.born>0) r.born-=dt*2;
     if(r.split>0) r.split-=dt*3.2;
-    if(r.held){ r.phase+=dt*0.4; continue; }
+    if(r.held){
+      r.phase+=dt*0.4;
+      r.stress+=dt/KILL_T;          // 酸に晒され続けると弱る
+      if(r.stress>=1){ r.dead=true; }
+      continue;
+    }
+    if(r.stress>0) r.stress=Math.max(0, r.stress-RELIEF*dt);   // 酸から出れば持ち直す
     r.phase+=dt*1.6;
     // ゆっくり泳ぐ
     r.ang+=rnd(-0.9,0.9)*dt;
@@ -282,21 +308,49 @@ function update(dt){
   }
   for(const p of add) addRod(p.x,p.y);
 
-  // 球菌は酸性領域の中で増える（無ければ盤面のどこかに湧く）
-  cocT+=dt;
-  if(cocT>=COC_SPAWN){
-    cocT=0;
-    if(zones.length){
-      const z=zones[Math.floor(Math.random()*zones.length)];
-      let placed=false;
+  // 酸に負けた個体を取り除く
+  const survivors=[];
+  for(const r of rods){
+    if(r.dead){
+      quelled++;
+      for(let k=0;k<8;k++) bits.push({x:r.x,y:r.y,vx:rnd(-.9,.9),vy:rnd(-1.0,.2),life:1,r:rnd(1,2.4)});
+      quellSnd();
+    }else survivors.push(r);
+  }
+  if(survivors.length!==rods.length) rods=survivors;
+
+  // ★輪を作る球菌は酸性領域の中で分裂して増える（＝抑制と同時に増殖工場になる）
+  for(const z of zones){
+    z.prod += z.beads.length*BREED*dt;
+    while(z.prod>=1){
+      z.prod-=1;
+      if(cocci.length>=COC_MAX) break;
       let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
       for(const p of z.poly){ minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);miny=Math.min(miny,p.y);maxy=Math.max(maxy,p.y); }
+      let placed=false;
       for(let t=0;t<14 && !placed;t++){
         const x=rnd(minx,maxx), y=rnd(miny,maxy);
         if(pointInPoly(x,y,z.poly)){ addCoccus(x,y); placed=true; }
       }
-      if(!placed) addCoccus();
-    }else addCoccus();
+      if(!placed) break;
+    }
+  }
+  // 領域が1つも無い時だけ、詰み防止に細々と湧く
+  cocT+=dt;
+  if(cocT>=COC_SPAWN){ cocT=0; if(!zones.length) addCoccus(); }
+
+  // 外から雑菌が侵入する（縁から入ってくる）
+  invT+=dt;
+  if(invT>=invadeInterval()){
+    invT=0;
+    const side=Math.floor(Math.random()*4);
+    let x,y;
+    if(side===0){ x=rnd(24,W-24); y=PLAY_TOP+16; }
+    else if(side===1){ x=rnd(24,W-24); y=playBot()-16; }
+    else if(side===2){ x=24; y=rnd(PLAY_TOP+24, playBot()-24); }
+    else { x=W-24; y=rnd(PLAY_TOP+24, playBot()-24); }
+    addRod(x,y);
+    invadeSnd();
   }
 
   if(rods.length>=LOSE_N && alive) lose();
@@ -306,7 +360,7 @@ function lose(){
   alive=false; dragging=false;
   const s=Math.floor(elapsed);
   if(s>best){ best=s; localStorage.setItem('containBest',best); }
-  document.getElementById('overS').innerHTML='抑え込んだ時間 <b>'+s+' 秒</b><br>これまで最長 '+best+' 秒';
+  document.getElementById('overS').innerHTML='抑え込んだ時間 <b>'+s+' 秒</b><br>鎮めた腐敗菌 <b>'+quelled+' 匹</b><br>これまで最長 '+best+' 秒';
   document.getElementById('over').classList.add('on');
   loseSnd();
 }
@@ -343,6 +397,21 @@ function divSnd(){ if(!A)return; try{
   const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=800;
   og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.05,t+0.01); og.gain.exponentialRampToValueAtTime(0.0001,t+0.12);
   o.connect(lp).connect(og).connect(A.destination); o.start(t); o.stop(t+0.14);
+}catch(e){} }
+function invadeSnd(){ if(!A)return; try{
+  const t=A.currentTime, o=A.createOscillator(), og=A.createGain();
+  o.type='sawtooth'; o.frequency.setValueAtTime(120,t); o.frequency.exponentialRampToValueAtTime(200,t+0.18);
+  const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=700;
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.055,t+0.03);
+  og.gain.exponentialRampToValueAtTime(0.0001,t+0.24);
+  o.connect(lp).connect(og).connect(A.destination); o.start(t); o.stop(t+0.26);
+}catch(e){} }
+function quellSnd(){ if(!A)return; try{
+  const t=A.currentTime, o=A.createOscillator(), og=A.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(660,t); o.frequency.exponentialRampToValueAtTime(1180,t+0.14);
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.13,t+0.012);
+  og.gain.exponentialRampToValueAtTime(0.0001,t+0.22);
+  o.connect(og).connect(A.destination); o.start(t); o.stop(t+0.24);
 }catch(e){} }
 function loseSnd(){ if(!A)return; try{
   const t=A.currentTime, o=A.createOscillator(), og=A.createGain();
@@ -382,8 +451,10 @@ function drawRod(r){
   g.save(); g.translate(r.x,r.y); g.rotate(r.ang);
   const wob=r.held?0:Math.sin(r.phase*3)*0.14;
   g.rotate(wob);
-  const grow=1+(r.split>0? r.split*0.35:0);
-  const h=ROD_L/2*grow, w=ROD_W/2;
+  const weak=r.stress||0;
+  const grow=(1+(r.split>0? r.split*0.35:0))*(1-weak*0.45);
+  const h=ROD_L/2*grow, w=ROD_W/2*(1-weak*0.35);
+  g.globalAlpha=1-weak*0.55;
   // 鞭毛（動いている個体だけ）
   if(!r.held){
     g.beginPath(); g.moveTo(-h,0);
@@ -398,6 +469,12 @@ function drawRod(r){
     g.strokeStyle='rgba(255,220,235,'+(0.9*r.split)+')'; g.lineWidth=2; g.stroke(); }
   if(r.born>0){ g.beginPath(); g.arc(0,0,ROD_L*0.7*(1-r.born)+6,0,7);
     g.strokeStyle='rgba(255,150,190,'+(0.5*r.born)+')'; g.lineWidth=2; g.stroke(); }
+  // 弱り具合を縮んでいく輪で示す（あと少しで鎮まる、が見える）
+  if(weak>0.04){
+    g.globalAlpha=1;
+    g.beginPath(); g.arc(0,0,ROD_L*0.75*(1-weak)+3,0,7);
+    g.strokeStyle='rgba(150,245,205,'+(0.25+0.6*weak)+')'; g.lineWidth=1.8; g.stroke();
+  }
   g.restore();
 }
 function drawZone(z){
@@ -474,7 +551,7 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 reset(); requestAnimationFrame(loop);
-window.__dbg={rods:()=>rods,cocci:()=>cocci,zones:()=>zones,chain:()=>chain,
+window.__dbg={rods:()=>rods,cocci:()=>cocci,zones:()=>zones,chain:()=>chain,quelled:()=>quelled,
   held:()=>rods.filter(r=>r.held).length, alive:()=>alive, elapsed:()=>elapsed,
   addRod:(x,y)=>addRod(x,y)};
 </script>
