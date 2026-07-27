@@ -41,7 +41,7 @@
   <div class="best" id="best"></div>
 </div>
 <div id="bar"><div id="barIn"></div></div>
-<div id="tip">なぞって桿菌を集め 指を離すとその場に酸の壁になる。腐敗の面を堰き止めろ</div>
+<div id="tip">なぞって乳酸菌を集め 指を離すとその場に酸の壁になる。腐敗の面を堰き止めろ</div>
 <button id="reset" class="btn">やり直す</button>
 <div id="over">
   <div class="t">漬物が腐ってしまった</div>
@@ -55,7 +55,8 @@
 //  案1「酸の壁を築く」
 //  ・腐敗は"点の敵"ではなく、角度ごとの侵食半径 rot[] が中心へ迫る"面"。
 //    → ぶつかるという概念が存在しない。ミスは即死でなく劣化。
-//  ・集めた桿菌は指を離した位置に定着して壁になる（運び続ける荷物ではない）。
+//  ・集めた乳酸菌(球菌=ロイコノストック等。鎖状に連なるのは球菌が典型)は
+//    指を離した位置に定着して壁になる（運び続ける荷物ではない）。
 //  ・壁に隙間があると腐敗が横に染み出して裏へ回る＝隙間を作らない動機。
 // ============================================================
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
@@ -71,8 +72,13 @@ function resize(){
 window.addEventListener('resize',()=>{resize();});
 
 const SCALE=1.25;
+// ★菌の形。rod=桿菌(ラクトバチルス) / cocci=球菌(ロイコノストック等・鎖状に連なる)
+//   ?shape=cocci で切替。乳酸菌には桿菌も球菌もいるが、"鎖状に連なる"のは球菌が典型
+// 既定は球菌。桿菌だと間隔(19.4px)より菌の長さ(18.8px)が近く、鎖が1本の管に
+// 融合して"何本繋がっているか"が見えなくなる（本数=力の仕様上これは致命的）
+const SHAPE=(new URLSearchParams(location.search).get('shape')==='rod')?'rod':'cocci';
 const RLEN=15*SCALE, RW=6.2*SCALE;
-const SPACING=15.5*SCALE;
+const SPACING=(SHAPE==='cocci'? 10.2:15.5)*SCALE;
 const CATCH_R=40*SCALE;
 
 const PLAY_TOP=100;
@@ -93,7 +99,7 @@ const SPAWN_EVERY=0.55;          // 桿菌が湧く間隔(秒)
 let rot=[], food=1, alive=true, elapsed=0, clock=0, shake=0;
 let free=[], placed=[], bits=[], sparks=[];
 let best=+(localStorage.getItem('wallBest')||0);
-let maxR=600, spawnT=0;
+let maxR=600, spawnT=0, hudT=0;
 
 function rnd(a,b){return a+Math.random()*(b-a);}
 function angIdx(a){ let i=Math.floor((a+Math.PI)/(Math.PI*2)*SECT); return ((i%SECT)+SECT)%SECT; }
@@ -180,7 +186,7 @@ function release(){
   for(const r of chain) for(let i=0;i<3;i++)
     sparks.push({x:r.x,y:r.y,vx:rnd(-.7,.7),vy:rnd(-.9,.2),life:1});
   chain=[]; joinedCount=0; path=[]; orderSeq=0;
-  setSnd(n);
+  setSnd(n); updateHud();
   if(n>=8) tipMsg('長い壁ほど広い角度を守れる');
 }
 cv.addEventListener('mousedown',e=>{if(!alive)return;const p=pos(e);start(p.x,p.y);});
@@ -331,9 +337,20 @@ function drawRod(x,y,ang,mode,hp){
   }
   else { g.fillStyle='#dfeef0'; g.strokeStyle='rgba(120,150,160,.5)'; }
   g.lineWidth=1;
-  const h=RLEN/2, w=RW/2;
-  g.beginPath(); g.arc(-h,0,w,Math.PI/2,Math.PI*1.5); g.arc(h,0,w,-Math.PI/2,Math.PI/2); g.closePath();
-  g.fill(); g.stroke();
+  if(SHAPE==='cocci'){
+    const R=RW*(mode==='free'? 1.02:0.92);
+    g.beginPath(); g.arc(0,0,R,0,7); g.fill(); g.stroke();
+    if(mode==='free'){   // 溶けカス粒子と区別するため細胞壁の輪郭を足す
+      g.beginPath(); g.arc(0,0,R+1.6,0,7);
+      g.strokeStyle='rgba(150,190,200,.55)'; g.lineWidth=1.2; g.stroke();
+    }
+    g.beginPath(); g.arc(-R*0.28,-R*0.28,R*0.34,0,7);
+    g.fillStyle='rgba(255,255,255,.28)'; g.fill();
+  }else{
+    const h=RLEN/2, w=RW/2;
+    g.beginPath(); g.arc(-h,0,w,Math.PI/2,Math.PI*1.5); g.arc(h,0,w,-Math.PI/2,Math.PI/2); g.closePath();
+    g.fill(); g.stroke();
+  }
   g.restore(); g.shadowBlur=0;
 }
 function drawRot(){
@@ -387,7 +404,7 @@ function loop(ts){
     elapsed+=dt;
     updateRot(dt);
     spawnT+=dt; if(spawnT>=SPAWN_EVERY){ spawnT=0; spawnFree(); }
-    if((Math.floor(elapsed*4)%4)===0) updateHud();
+    hudT+=dt; if(hudT>=0.25){ hudT=0; updateHud(); }
   }
 
   g.save();

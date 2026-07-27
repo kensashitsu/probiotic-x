@@ -37,7 +37,7 @@
   <div class="row">酸性の陣地 <b id="own">0</b> マス</div>
   <div class="best" id="best"></div>
 </div>
-<div id="tip">なぞって桿菌を集め 離すと通った筋のマスが酸性になる。腐敗のマスも塗り返せる</div>
+<div id="tip">なぞって乳酸菌を集め 離すと通った筋のマスが酸性になる。腐敗のマスも塗り返せる</div>
 <button id="reset" class="btn">やり直す</button>
 <div id="over">
   <div class="t">糠床が腐敗に覆われた</div>
@@ -50,7 +50,7 @@
 // ============================================================
 //  案3「陣取り」
 //  ・盤面はマス目。腐敗は一定間隔で隣へ広がる"面"＝ぶつかる対象が無い。
-//  ・集めた桿菌1本で1マスを酸性化。腐敗のマスも塗り返せる＝押し合いになる。
+//  ・集めた乳酸菌(球菌)1個で1マスを酸性化。腐敗のマスも塗り返せる＝押し合い。
 //  ・酸性の陣地から桿菌が湧く＝広げるほど補給が増える経済がある。
 //  ・中央の糠床(2x2)を全部取られたら負け。
 // ============================================================
@@ -59,8 +59,10 @@ const elOwn=document.getElementById('own'), elBest=document.getElementById('best
 let W,H,DPR;
 
 const SCALE=1.25;
+// 既定は球菌(ロイコノストック等)。桿菌だと鎖が1本の管に融合して本数が見えない
+const SHAPE=(new URLSearchParams(location.search).get('shape')==='rod')?'rod':'cocci';
 const RLEN=15*SCALE, RW=6.2*SCALE;
-const SPACING=15.5*SCALE;
+const SPACING=(SHAPE==='cocci'? 10.2:15.5)*SCALE;
 const CATCH_R=40*SCALE;
 
 const CELL=42;
@@ -132,7 +134,7 @@ function updateHud(){
 }
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
 
-// 桿菌は酸性の陣地から湧く（広げるほど補給が増える）
+// 乳酸菌は酸性の陣地から湧く（広げるほど補給が増える）
 function spawnFree(){
   if(free.length>=FREE_MAX) return;
   const spots=[];
@@ -321,9 +323,21 @@ function drawRod(x,y,ang,mode){
   if(mode==='chain'){ g.shadowColor='rgba(140,240,200,.9)'; g.shadowBlur=10; g.fillStyle='#c8ffe6'; g.strokeStyle='rgba(120,235,190,.9)'; }
   else { g.fillStyle='#dfeef0'; g.strokeStyle='rgba(120,150,160,.5)'; }
   g.lineWidth=1;
-  const h=RLEN/2, w=RW/2;
-  g.beginPath(); g.arc(-h,0,w,Math.PI/2,Math.PI*1.5); g.arc(h,0,w,-Math.PI/2,Math.PI/2); g.closePath();
-  g.fill(); g.stroke(); g.restore(); g.shadowBlur=0;
+  if(SHAPE==='cocci'){
+    const R=RW*(mode==='free'? 1.02:0.92);
+    g.beginPath(); g.arc(0,0,R,0,7); g.fill(); g.stroke();
+    if(mode==='free'){
+      g.beginPath(); g.arc(0,0,R+1.6,0,7);
+      g.strokeStyle='rgba(150,190,200,.55)'; g.lineWidth=1.2; g.stroke();
+    }
+    g.beginPath(); g.arc(-R*0.28,-R*0.28,R*0.34,0,7);
+    g.fillStyle='rgba(255,255,255,.28)'; g.fill();
+  }else{
+    const h=RLEN/2, w=RW/2;
+    g.beginPath(); g.arc(-h,0,w,Math.PI/2,Math.PI*1.5); g.arc(h,0,w,-Math.PI/2,Math.PI/2); g.closePath();
+    g.fill(); g.stroke();
+  }
+  g.restore(); g.shadowBlur=0;
 }
 let tms=0;
 function loop(ts){
