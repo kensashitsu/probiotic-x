@@ -82,7 +82,8 @@ const DIV_T=13.0;        // 腐敗菌の倍加時間。経済を立ち上げる�
 const DIV_JIT=0.35;
 const ROD_START=4;
 const LOSE_N=100;
-const ROD_SPEED=7;
+const ROD_SPEED=2.2;     // ほとんど動かない＝コロニーを作る。散らばると1回の輪が
+                         // 全体のごく一部しか触れず、行動の手応えが消える
 const COVER=28;          // 球菌1個が受け持つ輪の長さ。大きいほど輪が安く作れる
 const LIFE_BASE=18;
 const LIFE_MAX=42;
@@ -94,6 +95,8 @@ const INVADE0=10.0;       // 最初の侵入間隔(秒)
 const INVADE_MIN=2.6;
 const INVADE_RAMP=0.085;  // 1秒ごとに間隔が縮む量
 function invadeInterval(){ return Math.max(INVADE_MIN, INVADE0-elapsed*INVADE_RAMP); }
+// ★達成できる目標。常に敗北で終わる構造だと、上手くやっても敗北の記憶しか残らない
+const GOALS=[30,60,90,130];
 const BREED=0.11;         // 輪の球菌1個あたりの増殖速度(/秒)。倍加約6.3秒。
                           // 腐敗菌の倍加13秒より速い＝上手く回せば押し返せる
 const MIN_AREA=2200;
@@ -104,6 +107,7 @@ const RELIEF=0.22;        // 酸から出た時に回復する速さ(/秒)
 let rods=[], cocci=[], zones=[], bits=[];
 let best=+(localStorage.getItem('containBest')||0);
 let elapsed=0, clock=0, alive=true, shake=0, hudT=0, cocT=0, quelled=0, invT=0;
+let goalIdx=0, goalFlash=0, won=false;
 
 function rnd(a,b){return a+Math.random()*(b-a);}
 function resize(){
@@ -127,6 +131,7 @@ function reset(){
   resize();
   rods=[]; cocci=[]; zones=[]; bits=[];
   elapsed=0; alive=true; shake=0; hudT=0; cocT=0; quelled=0; invT=0;
+  goalIdx=0; goalFlash=0; won=false;
   for(let i=0;i<ROD_START;i++) addRod(rnd(50,W-50), rnd(PLAY_TOP+40, playBot()-40));
   for(let i=0;i<16;i++) addCoccus();
   chain=[]; path=[]; dragging=false; orderSeq=0;
@@ -137,7 +142,9 @@ function reset(){
 function updateHud(){
   elSec.textContent=Math.floor(elapsed);
   const held=rods.filter(r=>r.held).length;
-  elSm.textContent='腐敗菌 '+rods.length+'/'+LOSE_N+'　抑制中 '+held+'　鎮めた '+quelled;
+  const nextGoal=goalIdx<GOALS.length? GOALS[goalIdx]:null;
+  elSm.textContent='腐敗菌 '+rods.length+'/'+LOSE_N+'　鎮めた '+quelled
+    +(nextGoal? '　次の目標 '+nextGoal+'秒':'　完走');
   elBar.style.width=Math.min(100, rods.length/LOSE_N*100).toFixed(1)+'%';
 }
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
@@ -309,15 +316,20 @@ function update(dt){
   for(const p of add) addRod(p.x,p.y);
 
   // 酸に負けた個体を取り除く
+  let killedThisFrame=0;
   const survivors=[];
   for(const r of rods){
     if(r.dead){
-      quelled++;
-      for(let k=0;k<8;k++) bits.push({x:r.x,y:r.y,vx:rnd(-.9,.9),vy:rnd(-1.0,.2),life:1,r:rnd(1,2.4)});
-      quellSnd();
+      quelled++; killedThisFrame++;
+      for(let k=0;k<10;k++) bits.push({x:r.x,y:r.y,vx:rnd(-1.1,1.1),vy:rnd(-1.2,.3),life:1,r:rnd(1.2,3)});
     }else survivors.push(r);
   }
-  if(survivors.length!==rods.length) rods=survivors;
+  if(survivors.length!==rods.length){
+    rods=survivors;
+    quellSnd(killedThisFrame);
+    if(killedThisFrame>=2){ shake=Math.max(shake,3.5); tipMsg(killedThisFrame+'匹まとめて鎮まった！'); }
+    updateHud();
+  }
 
   // ★輪を作る球菌は酸性領域の中で分裂して増える（＝抑制と同時に増殖工場になる）
   for(const z of zones){
@@ -353,14 +365,38 @@ function update(dt){
     invadeSnd();
   }
 
+  // 段階目標
+  if(goalIdx<GOALS.length && elapsed>=GOALS[goalIdx]){
+    const reached=GOALS[goalIdx];
+    goalIdx++; goalFlash=1.6;
+    goalSnd(goalIdx);
+    if(goalIdx>=GOALS.length){ win(); }
+    else tipMsg(reached+'秒 突破！ 次は'+GOALS[goalIdx]+'秒');
+  }
+  if(goalFlash>0) goalFlash-=dt;
   if(rods.length>=LOSE_N && alive) lose();
   hudT+=dt; if(hudT>=0.25){ hudT=0; updateHud(); }
+}
+function win(){
+  won=true; alive=false; dragging=false;
+  const s=Math.floor(elapsed);
+  if(s>best){ best=s; localStorage.setItem('containBest',best); }
+  const o=document.getElementById('over');
+  o.querySelector('.t').textContent='守り切った！';
+  o.querySelector('.t').style.color='#8ff0c0';
+  document.getElementById('overS').innerHTML=GOALS[GOALS.length-1]+' 秒を完走<br>鎮めた腐敗菌 <b>'+quelled+' 匹</b>';
+  o.classList.add('on');
+  winSnd();
 }
 function lose(){
   alive=false; dragging=false;
   const s=Math.floor(elapsed);
   if(s>best){ best=s; localStorage.setItem('containBest',best); }
-  document.getElementById('overS').innerHTML='抑え込んだ時間 <b>'+s+' 秒</b><br>鎮めた腐敗菌 <b>'+quelled+' 匹</b><br>これまで最長 '+best+' 秒';
+  const o=document.getElementById('over');
+  o.querySelector('.t').textContent='腐敗菌に埋め尽くされた';
+  o.querySelector('.t').style.color='#ff9a80';
+  const cleared=goalIdx>0? GOALS[goalIdx-1]+'秒を突破':'目標未達';
+  document.getElementById('overS').innerHTML='抑え込んだ時間 <b>'+s+' 秒</b>（'+cleared+'）<br>鎮めた腐敗菌 <b>'+quelled+' 匹</b><br>これまで最長 '+best+' 秒';
   document.getElementById('over').classList.add('on');
   loseSnd();
 }
@@ -406,12 +442,32 @@ function invadeSnd(){ if(!A)return; try{
   og.gain.exponentialRampToValueAtTime(0.0001,t+0.24);
   o.connect(lp).connect(og).connect(A.destination); o.start(t); o.stop(t+0.26);
 }catch(e){} }
-function quellSnd(){ if(!A)return; try{
-  const t=A.currentTime, o=A.createOscillator(), og=A.createGain();
-  o.type='sine'; o.frequency.setValueAtTime(660,t); o.frequency.exponentialRampToValueAtTime(1180,t+0.14);
-  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.13,t+0.012);
-  og.gain.exponentialRampToValueAtTime(0.0001,t+0.22);
-  o.connect(og).connect(A.destination); o.start(t); o.stop(t+0.24);
+function quellSnd(n){ if(!A)return; try{
+  const t=A.currentTime, k=Math.max(1,n||1);
+  for(let i=0;i<Math.min(k,4);i++){
+    const o=A.createOscillator(), og=A.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(620+i*90,t+i*0.05);
+    o.frequency.exponentialRampToValueAtTime((620+i*90)*1.8,t+i*0.05+0.14);
+    og.gain.setValueAtTime(0.0001,t+i*0.05); og.gain.exponentialRampToValueAtTime(0.13,t+i*0.05+0.012);
+    og.gain.exponentialRampToValueAtTime(0.0001,t+i*0.05+0.24);
+    o.connect(og).connect(A.destination); o.start(t+i*0.05); o.stop(t+i*0.05+0.26);
+  }
+}catch(e){} }
+function goalSnd(n){ if(!A)return; try{
+  const t=A.currentTime, base=520+n*40;
+  [0,4,7,12].forEach((iv,k)=>{ const o=A.createOscillator(), og=A.createGain();
+    o.type='triangle'; o.frequency.value=base*Math.pow(2,iv/12);
+    og.gain.setValueAtTime(0.0001,t+k*0.07); og.gain.exponentialRampToValueAtTime(0.11,t+0.02+k*0.07);
+    og.gain.exponentialRampToValueAtTime(0.0001,t+0.5+k*0.07);
+    o.connect(og).connect(A.destination); o.start(t+k*0.07); o.stop(t+0.56+k*0.07); });
+}catch(e){} }
+function winSnd(){ if(!A)return; try{
+  const t=A.currentTime;
+  [0,4,7,12,16,19].forEach((iv,k)=>{ const o=A.createOscillator(), og=A.createGain();
+    o.type='triangle'; o.frequency.value=440*Math.pow(2,iv/12);
+    og.gain.setValueAtTime(0.0001,t+k*0.11); og.gain.exponentialRampToValueAtTime(0.12,t+0.02+k*0.11);
+    og.gain.exponentialRampToValueAtTime(0.0001,t+0.8+k*0.11);
+    o.connect(og).connect(A.destination); o.start(t+k*0.11); o.stop(t+0.9+k*0.11); });
 }catch(e){} }
 function loseSnd(){ if(!A)return; try{
   const t=A.currentTime, o=A.createOscillator(), og=A.createGain();
@@ -431,6 +487,19 @@ function pointBack(d){
     acc+=seg;
   }
   const p=path[0]||head; return {x:p.x,y:p.y};
+}
+
+// ★描いている最中に「今この輪を閉じたら何秒保つか」を返す。
+//   これが無いと、閉じる前に足りるか判断する手段が無く
+//   「自分の操作が正しいのか分からない」状態になる
+function previewLife(){
+  if(!dragging || chain.length===0 || path.length<2) return null;
+  let per=0;
+  for(let i=1;i<path.length;i++) per+=Math.hypot(path[i].x-path[i-1].x, path[i].y-path[i-1].y);
+  per+=Math.hypot(head.x-path[0].x, head.y-path[0].y);   // 今いる所から始点へ閉じたと仮定
+  if(per<20) return null;
+  const dens=(chain.length*COVER)/per;
+  return {life:Math.min(LIFE_MAX, LIFE_BASE*dens), per};
 }
 
 // ---------------- 描画 ----------------
@@ -487,6 +556,18 @@ function drawZone(z){
   g.strokeStyle='rgba(150,245,205,'+(0.15+0.4*k)+')'; g.lineWidth=1.5; g.stroke();
   if(z.flash>0){ g.strokeStyle='rgba(200,255,230,'+(0.7*z.flash)+')'; g.lineWidth=3+4*z.flash; g.stroke(); }
   g.restore();
+  // 鎮圧の進み具合（中の桿菌の平均の弱り具合）を輪の内側の弧で見せる
+  let sum=0, cnt=0;
+  for(const r of rods) if(r.held && pointInPoly(r.x,r.y,z.poly)){ sum+=r.stress; cnt++; }
+  if(cnt>0){
+    const prog=sum/cnt;
+    let cx=0,cy=0; for(const p of z.poly){cx+=p.x;cy+=p.y;} cx/=z.poly.length; cy/=z.poly.length;
+    let rad=0; for(const p of z.poly) rad=Math.max(rad,Math.hypot(p.x-cx,p.y-cy));
+    g.save();
+    g.beginPath(); g.arc(cx,cy,rad*0.72,-Math.PI/2,-Math.PI/2+Math.PI*2*prog);
+    g.strokeStyle='rgba(160,255,215,'+(0.35+0.45*prog)+')'; g.lineWidth=3; g.stroke();
+    g.restore();
+  }
   for(const b of z.beads) drawCoccus(b.x,b.y,'ring',0.35+0.65*k);
 }
 let tms=0;
@@ -519,8 +600,21 @@ function loop(ts){
     g.beginPath(); g.moveTo(path[0].x,path[0].y);
     for(let i=1;i<path.length;i++) g.lineTo(path[i].x,path[i].y);
     g.lineTo(head.x,head.y);
-    g.strokeStyle='rgba(140,240,200,.20)'; g.lineWidth=COC_R*2+4; g.lineCap='round'; g.lineJoin='round';
-    g.shadowColor='rgba(140,240,200,.45)'; g.shadowBlur=10; g.stroke(); g.shadowBlur=0;
+    const pv=previewLife();
+    let col='rgba(140,240,200,.20)', glow='rgba(140,240,200,.45)';
+    if(pv){
+      if(pv.life>=KILL_T){ col='rgba(140,240,200,.30)'; glow='rgba(140,240,200,.6)'; }
+      else if(pv.life>=KILL_T*0.55){ col='rgba(245,200,120,.30)'; glow='rgba(245,200,120,.5)'; }
+      else { col='rgba(255,120,100,.28)'; glow='rgba(255,120,100,.45)'; }
+    }
+    g.strokeStyle=col; g.lineWidth=COC_R*2+4; g.lineCap='round'; g.lineJoin='round';
+    g.shadowColor=glow; g.shadowBlur=10; g.stroke(); g.shadowBlur=0;
+    // 始点へ閉じる線を点線で見せる（どこで閉じられるかが分かる）
+    if(pv){
+      g.save(); g.setLineDash([5,7]);
+      g.beginPath(); g.moveTo(head.x,head.y); g.lineTo(path[0].x,path[0].y);
+      g.strokeStyle=col; g.lineWidth=2; g.stroke(); g.restore();
+    }
   }
   // 鎖
   const headAdv=dragging? Math.hypot(head.x-prevHead.x, head.y-prevHead.y):0;
@@ -541,17 +635,40 @@ function loop(ts){
     if(chain.length>0){
       g.save(); g.font='800 18px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='middle';
       const bx=head.x, by=head.y-52;
+      const pv2=previewLife();
+      const ok = pv2? (pv2.life>=KILL_T? 2 : (pv2.life>=KILL_T*0.55?1:0)) : 2;
+      const ring = ok===2? 'rgba(140,250,200,.95)' : (ok===1? 'rgba(245,200,120,.95)':'rgba(255,130,105,.95)');
+      const txt  = ok===2? '#a6ffd4' : (ok===1? '#ffd88a':'#ff9a80');
       g.beginPath(); g.arc(bx,by,17,0,7); g.fillStyle='rgba(6,14,12,.82)'; g.fill();
-      g.strokeStyle='rgba(140,250,200,.95)'; g.lineWidth=2; g.stroke();
-      g.fillStyle='#a6ffd4'; g.fillText(chain.length,bx,by+1); g.restore();
+      g.strokeStyle=ring; g.lineWidth=2; g.stroke();
+      g.fillStyle=txt; g.fillText(chain.length,bx,by+1);
+      if(pv2){
+        g.font='800 13px system-ui,-apple-system,sans-serif';
+        g.fillStyle=txt;
+        g.fillText(pv2.life.toFixed(1)+'秒', bx, by-27);
+        g.font='700 10.5px system-ui,-apple-system,sans-serif';
+        g.fillStyle= ok===2? 'rgba(166,255,212,.8)':(ok===1?'rgba(255,216,138,.85)':'rgba(255,154,128,.9)');
+        g.fillText(ok===2? '鎮まる':(ok===1?'止まるだけ':'薄すぎ'), bx, by-42);
+      }
+      g.restore();
     }
+  }
+  if(goalFlash>0){
+    const k=Math.min(1,goalFlash/1.6);
+    g.save();
+    g.strokeStyle='rgba(150,245,205,'+(0.5*k)+')'; g.lineWidth=6;
+    g.strokeRect(4,PLAY_TOP-6,W-8,playBot()-PLAY_TOP+12);
+    g.font='800 26px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillStyle='rgba(160,255,215,'+(0.9*k)+')';
+    g.fillText(goalIdx<GOALS.length? GOALS[goalIdx-1]+'秒 突破！':'完走！', W/2, H*0.34);
+    g.restore();
   }
   prevHead.x=head.x; prevHead.y=head.y;
   g.restore();
   requestAnimationFrame(loop);
 }
 reset(); requestAnimationFrame(loop);
-window.__dbg={rods:()=>rods,cocci:()=>cocci,zones:()=>zones,chain:()=>chain,quelled:()=>quelled,
+window.__dbg={rods:()=>rods,cocci:()=>cocci,zones:()=>zones,chain:()=>chain,quelled:()=>quelled,won:()=>won,goal:()=>goalIdx,
   held:()=>rods.filter(r=>r.held).length, alive:()=>alive, elapsed:()=>elapsed,
   addRod:(x,y)=>addRod(x,y)};
 </script>
