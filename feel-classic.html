@@ -28,7 +28,7 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="hud"><div class="n">封じた <b id="cnt">0</b></div><div class="best" id="best"></div></div>
-<div id="tip">なぞって乳酸菌を繋ぎ 腐敗菌（鞭毛の桿菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
+<div id="tip">なぞって乳酸菌（桿菌）を繋ぎ 雑菌（ブドウ球菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
 <button id="reset">まき直す</button>
 
 <script>
@@ -58,7 +58,10 @@ window.addEventListener('resize',resize);
 const _q=new URLSearchParams(location.search);
 const _old=_q.get('look')==='old';
 const PLAYER_SHAPE=(_q.get('player')==='cocci')?'cocci':'rod';
-const FOE_SHAPE=(_old||_q.get('foe')==='blob')?'blob':'rod';
+// 敵の見た目：既定は球菌の房（ブドウ球菌）。鞭毛の桿菌は生々しくて不評だった。
+// 球菌でも「黄色ブドウ球菌＝食中毒菌で、乳酸菌が実際に抑える相手」なので筋は通る。
+// ?foe=rod 鞭毛の桿菌 ／ ?foe=blob 以前のトゲの胞子塊
+const FOE_SHAPE=(_old||_q.get('foe')==='blob')?'blob':(_q.get('foe')==='rod'?'rod':'cocci');
 const SCALE=1.25;
 const RLEN=15*SCALE, RW=6.2*SCALE;   // 桿菌の長さ・太さ
 const SPACING=(PLAYER_SHAPE==='cocci'? 10.2:15.5)*SCALE;   // 鎖の玉間隔（球菌は詰める）
@@ -232,7 +235,7 @@ const HIT_MODE=(new URLSearchParams(location.search).get('hit')==='all')?'all':'
 // ★桿菌は細長いので、当たりも円ではなくカプセル（線分からの距離）で取る。
 //   円のままだと半径26pxになり「見た目では触れていないのに弾ける」が起きる
 function foeDist(px,py,f){
-  if(FOE_SHAPE!=='rod') return Math.hypot(px-f.x,py-f.y)-f.r;
+  if(FOE_SHAPE!=='rod') return Math.hypot(px-f.x,py-f.y)-f.r*0.95;
   const sh=foeShape(f), ang=sh.ang, L=sh.L, Wd=sh.Wd;
   const ax=f.x-Math.cos(ang)*L/2, ay=f.y-Math.sin(ang)*L/2;
   const bx=f.x+Math.cos(ang)*L/2, by=f.y+Math.sin(ang)*L/2;
@@ -268,7 +271,7 @@ function shatter(ox,oy){
   joinedCount=0; orderSeq=0;
   hitCd=0.45; shake=Math.max(shake, 6+Math.min(joined.length,12));
   breakSnd(joined.length);
-  tipMsg('腐敗菌に触れると鎖が弾ける！ 触れずに囲め');
+  tipMsg('雑菌に触れると鎖が弾ける！ 触れずに囲め');
 }
 
 cv.addEventListener('mousedown',e=>{const p=pos(e);start(p.x,p.y);});
@@ -397,6 +400,51 @@ function drawRod(x,y,ang,joined,alpha,weak){
   }
   g.restore(); g.globalAlpha=1;
 }
+// 敵＝ブドウ球菌。球が房状に固まった塊。鞭毛は無い＝生々しさが出ない
+function foeClump(f){
+  if(!f.clump){
+    const n=5+Math.floor(Math.random()*3);
+    const a=[{dx:0,dy:0,s:1}];
+    for(let i=1;i<n;i++){
+      const t=i/(n-1)*Math.PI*2+Math.random()*0.5;
+      const d=f.r*rnd(0.46,0.66);
+      a.push({dx:Math.cos(t)*d, dy:Math.sin(t)*d, s:rnd(0.72,0.95)});
+    }
+    f.clump=a;
+  }
+  return f.clump;
+}
+function drawFoeCocci(f,warn){
+  const k=f.dead? Math.max(0,1-f.dt*3):1;
+  if(k>0){
+    const rs=f.resist||0;
+    g.save(); g.translate(f.x,f.y); g.rotate((f.ang||0)+f.phase*0.12); g.globalAlpha=k;
+    const R=f.r*0.52*k;
+    if(!f.dead){ g.shadowColor='rgba(190,70,120,.45)'; g.shadowBlur=7; }
+    for(const c of foeClump(f)){
+      g.beginPath(); g.arc(c.dx*k, c.dy*k, R*c.s, 0, 7);
+      g.fillStyle= f.dead? 'rgba(160,96,70,'+k+')'
+        : (rs>0? 'rgba('+Math.round(150+90*rs)+',66,92,.96)':'rgba(168,80,118,.95)');
+      g.strokeStyle= f.dead? 'rgba(200,140,120,.5)':'rgba(226,138,178,.75)';
+      g.lineWidth=1; g.fill(); g.stroke();
+    }
+    g.shadowBlur=0;
+    if(!f.dead){   // 房らしいハイライト
+      for(const c of foeClump(f)){
+        g.beginPath(); g.arc(c.dx*k-R*c.s*0.3, c.dy*k-R*c.s*0.3, R*c.s*0.3, 0, 7);
+        g.fillStyle='rgba(255,215,235,.22)'; g.fill();
+      }
+    }
+    g.restore(); g.globalAlpha=1;
+  }
+  if(warn>0 && !f.dead){
+    const pulse=0.72+0.28*Math.sin(clock*9);
+    g.save(); g.translate(f.x,f.y);
+    g.beginPath(); g.arc(0,0,f.r+20+48*warn,0,7);
+    g.strokeStyle='rgba(255,150,110,'+(0.95*warn*pulse)+')'; g.lineWidth=2.5+3*warn; g.stroke();
+    g.restore();
+  }
+}
 // 敵＝桿菌の形は1箇所で決める（描画と当たり判定がずれないように）。
 // 縦横比は約2.9:1＝実際の桿菌らしい細さ。太いと棒に見えず、脇を抜ける余地も消える
 function foeShape(f){
@@ -442,6 +490,7 @@ function drawFoeRod(f,warn){
   }
 }
 function drawFoe(f,warn){
+  if(FOE_SHAPE==='cocci'){ drawFoeCocci(f,warn); return; }
   if(FOE_SHAPE==='rod'){ drawFoeRod(f,warn); return; }
   g.save(); g.translate(f.x,f.y); g.rotate(f.phase*0.3);
   const scale = f.dead ? Math.max(0,1-f.dt*3) : 1;
