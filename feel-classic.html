@@ -62,7 +62,11 @@ const PLAYER_SHAPE=(_q.get('player')==='cocci')?'cocci':'rod';
 // 球菌でも「黄色ブドウ球菌＝食中毒菌で、乳酸菌が実際に抑える相手」なので筋は通る。
 // ?foe=rod 鞭毛の桿菌 ／ ?foe=blob 以前のトゲの胞子塊
 const FOE_SHAPE=(_old||_q.get('foe')==='blob')?'blob':(_q.get('foe')==='rod'?'rod':'cocci');
-const SCALE=1.25;
+// ★自由度＝(動ける面積)÷(菌のサイズ^2)。PC版(390x844,SCALE=1.0)は約1044だったが、
+//   スマホ(375x667)で見やすさのためSCALE=1.25にしたら467＝PC版の45%まで狭まり、
+//   「決まった動きの単純作業」になっていた。SCALE=0.83でPC版と同等の自由度に戻る。
+//   ?scale=1.25 のように指定して比べられる
+const SCALE=Math.max(0.5, Math.min(2, +(_q.get('scale')||0.85)));
 const RLEN=15*SCALE, RW=6.2*SCALE;   // 桿菌の長さ・太さ
 const SPACING=(PLAYER_SHAPE==='cocci'? 10.2:15.5)*SCALE;   // 鎖の玉間隔（球菌は詰める）
 const CATCH_R=40*SCALE;              // 吸い付く射程
