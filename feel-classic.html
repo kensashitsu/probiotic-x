@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v41 (07-29 08:42)';
+const BUILD='v42 (07-29 08:51)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -658,11 +658,17 @@ function checkHit(){
 }
 // 酸のオーラが連鎖に触れたら、その連鎖を丸ごと弾き飛ばす
 function auraBurst(){
-  const R=auraR()*(0.6+0.4*aura);
+  // ★オーラは先頭だけでなく「繋がった列全体」が纏う。見た目と判定を必ず一致させる
+  const R=auraR()*(0.6+0.4*aura), Rr=R*0.72;
+  const chain=rods.filter(r=>r.joined);
+  const reach=R + joinedCount*SPACING + 60;
   for(const f of foes){
     if(f.dead||f.sos!=null) continue;
     if(!(f.link&&!f.link.dead) && !(f.next&&!f.next.dead)) continue;   // 単体は弾けない
-    if(!sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,R)) continue;
+    if(Math.hypot(f.x-head.x,f.y-head.y)>reach) continue;              // 遠いものは早々に除外
+    let touched=sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,R);
+    if(!touched){ for(const r of chain){ if(foeDist(r.x,r.y,f)<Rr){ touched=true; break; } } }
+    if(!touched) continue;
     // その連鎖を全部たどって切り離す
     const list=[]; let cur=f;
     while(cur&&!cur.dead){ list.push(cur); cur=cur.link&&!cur.link.dead? cur.link:null; }
@@ -1416,17 +1422,34 @@ function loop(ts){
     drawRod(r.x,r.y,r.ang,true);
   }
 
-  // ★疾走中の酸のオーラ
+  // ★疾走中の酸のオーラ。先頭だけでなく繋がった列全体が纏う（判定も列全体）
   if(dragging && aura>0.03){
-    const R=auraR()*(0.6+0.4*aura), pu=0.86+0.14*Math.sin(clock*14);
-    g.save(); g.globalCompositeOperation='lighter';
+    const R=auraR()*(0.6+0.4*aura), pu=0.90+0.10*Math.sin(clock*14);
+    const pts=[{x:head.x,y:head.y}];
+    // joined は order 昇順＝0が尻尾。先頭から尻尾へ向かう順に並べ直す
+    for(let i=joined.length-1;i>=0;i--) pts.push({x:joined[i].x,y:joined[i].y});
+    g.save(); g.globalCompositeOperation='lighter'; g.lineCap='round'; g.lineJoin='round';
+    if(pts.length>1){
+      const trace=()=>{ g.beginPath(); g.moveTo(pts[0].x,pts[0].y);
+        for(let i=1;i<pts.length;i++) g.lineTo(pts[i].x,pts[i].y); };
+      // 外側のもや → 内側の芯、の3層で気体っぽく
+      g.strokeStyle='rgba(110,235,185,'+(0.10*aura)+')'; g.lineWidth=R*1.55*pu; trace(); g.stroke();
+      g.strokeStyle='rgba(150,250,205,'+(0.13*aura)+')'; g.lineWidth=R*0.95*pu; trace(); g.stroke();
+      g.strokeStyle='rgba(200,255,230,'+(0.16*aura)+')'; g.lineWidth=R*0.42*pu; trace(); g.stroke();
+    }
+    // 先頭はいちばん濃い
     const ag=g.createRadialGradient(head.x,head.y,R*0.15,head.x,head.y,R*pu);
-    ag.addColorStop(0,'rgba(170,255,220,'+(0.34*aura)+')');
-    ag.addColorStop(0.55,'rgba(120,240,190,'+(0.16*aura)+')');
+    ag.addColorStop(0,'rgba(180,255,225,'+(0.30*aura)+')');
+    ag.addColorStop(0.55,'rgba(120,240,190,'+(0.14*aura)+')');
     ag.addColorStop(1,'rgba(110,230,180,0)');
     g.fillStyle=ag; g.beginPath(); g.arc(head.x,head.y,R*pu,0,7); g.fill();
-    g.strokeStyle='rgba(190,255,230,'+(0.30*aura)+')'; g.lineWidth=1.6;
-    g.beginPath(); g.arc(head.x,head.y,R*0.92*pu,0,7); g.stroke();
+    // 列の縁をなぞる淡い輪郭＝どこまで酸が届くかが分かる
+    if(pts.length>1){
+      g.strokeStyle='rgba(200,255,230,'+(0.22*aura)+')'; g.lineWidth=1.4;
+      g.beginPath(); g.moveTo(pts[0].x,pts[0].y);
+      for(let i=1;i<pts.length;i++) g.lineTo(pts[i].x,pts[i].y);
+      g.stroke();
+    }
     g.restore();
   }
   if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
