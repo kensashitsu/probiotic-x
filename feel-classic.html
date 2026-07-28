@@ -37,7 +37,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v24 (07-28 10:50)';
+const BUILD='v25 (07-28 11:17)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
@@ -94,8 +94,31 @@ function worldW(){ return W*WORLD; }
 function worldBot(){ return PLAY_TOP + (playBot()-PLAY_TOP)*WORLD; }
 function playArea(){ return worldW()*Math.max(120, worldBot()-PLAY_TOP); }
 let cam={x:0,y:0};
-function camMaxX(){ return Math.max(0, worldW()-W); }
-function camMaxY(){ return Math.max(0, worldBot()+120-H); }
+// ★動的ズーム：疾走中だけ画面を引いて先を見せ、止まると元の大きさに戻る。
+//   囲む時＝精密操作の時はキャラが大きいまま。?zoom=1 で無効化できる
+const ZOOM_MIN=Math.max(0.5, Math.min(1, +(_q.get('zoom')||0.74)));
+let zoom=1;
+function viewW(){ return W/zoom; }
+function viewH(){ return H/zoom; }
+function updateZoom(dt){
+  if(ZOOM_MIN>=1) return;
+  const sp=dragging? Math.hypot(camVel.x,camVel.y) : 0;
+  const t=Math.min(1, Math.max(0,(sp-120)/780));
+  const want=1-(1-ZOOM_MIN)*t;
+  let nz=zoom+(want-zoom)*Math.min(1, dt*(want<zoom? 4.5:1.3));  // 引くのは速く、戻すのは緩やか
+  // 世界より広くは引かない（世界の外まで見えると座標の対応が崩れる）
+  const zMin=Math.max(W/worldW(), H/(worldBot()+120));
+  if(nz<zMin) nz=zMin;
+  if(nz>1) nz=1;
+  if(Math.abs(nz-zoom)>1e-5){
+    // 指の下の世界座標が動かないよう cam を補正（これが無いと拡縮のたびに手元がずれる）
+    cam.x+=finger.x/zoom-finger.x/nz;
+    cam.y+=finger.y/zoom-finger.y/nz;
+    zoom=nz; clampCam();
+  }
+}
+function camMaxX(){ return Math.max(0, worldW()-viewW()); }
+function camMaxY(){ return Math.max(0, worldBot()+120-viewH()); }
 function clampCam(){
   cam.x=Math.max(0,Math.min(camMaxX(),cam.x));
   cam.y=Math.max(0,Math.min(camMaxY(),cam.y));
@@ -209,7 +232,7 @@ function followCam(dt){
   clampCam();
 }
 function inView(x,y,m){ m=m||60;
-  return x>cam.x-m && x<cam.x+W+m && y>cam.y-m && y<cam.y+H+m; }
+  return x>cam.x-m && x<cam.x+viewW()+m && y>cam.y-m && y<cam.y+viewH()+m; }
 function rodCount(){ return Math.max(20, Math.round(RODS_REF*playArea()/REF_AREA)); }
 function foeCount(){ return Math.max(5,  Math.round(FOES_REF*playArea()/REF_AREA)); }
 const DOOM=4.5;               // 弾け飛んだ菌の餓死までの秒数
@@ -265,7 +288,7 @@ let clock=0;   // 経過秒。軌跡の各点の生成時刻に使う
 function pos(e){const r=cv.getBoundingClientRect();
   finger.x=e.clientX-r.left; finger.y=e.clientY-r.top;   // カメラの流れに使う
   feedDir(finger.x, finger.y);                            // 旋回の検出
-  const x=finger.x+cam.x, y=finger.y+cam.y;
+  const x=finger.x/zoom+cam.x, y=finger.y/zoom+cam.y;
   return{ x:Math.max(6, Math.min(worldW()-6, x)),
           y:Math.max(PLAY_TOP-6, Math.min(worldBot()+6, y)) };}
 
@@ -705,12 +728,12 @@ function loop(ts){
   clock+=dt;
   if(sealCooldown>0) sealCooldown-=dt;
   if(hitCd>0) hitCd-=dt;
-  followCam(dt);
+  followCam(dt); updateZoom(dt);
   if(dragging){
     // ★指を止めたままでもカメラは流れる。先頭は毎フレーム「指の画面位置＋カメラ」で
     //   引き直す。これが無いと先頭だけ世界に取り残されて画面外へ消える
-    moveTo(Math.max(6, Math.min(worldW()-6, finger.x+cam.x)),
-           Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y+cam.y)));
+    moveTo(Math.max(6, Math.min(worldW()-6, finger.x/zoom+cam.x)),
+           Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y/zoom+cam.y)));
     trimTrail(); checkHit();
   }
 
@@ -722,7 +745,7 @@ function loop(ts){
   const bg=g.createRadialGradient(W/2,H*0.45,60,W/2,H*0.45,Math.max(W,H)*0.8);
   bg.addColorStop(0,'#12202a'); bg.addColorStop(1,'#0b0f14'); g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
 
-  g.translate(-cam.x,-cam.y);   // ここから世界座標
+  g.scale(zoom,zoom); g.translate(-cam.x,-cam.y);   // ここから世界座標（ズーム込み）
   // 世界の縁（どこまで行けるか分かるように薄く）
   g.strokeStyle='rgba(120,200,180,.10)'; g.lineWidth=2;
   g.strokeRect(0,PLAY_TOP,worldW(),worldBot()-PLAY_TOP);
@@ -859,8 +882,8 @@ function loop(ts){
     // ★指は物理的に8〜10mm＝55〜64px を覆う。30pxでは指の下に隠れるので離す。
     //   画面上端に近い時は指の下側に回す
     const br=17;
-    const bx=Math.max(cam.x+br+4, Math.min(cam.x+W-br-4, head.x));
-    const by=(head.y-56 < cam.y+br+50)? head.y+56 : head.y-56;
+    const bx=Math.max(cam.x+br/zoom+4, Math.min(cam.x+viewW()-br/zoom-4, head.x));
+    const by=(head.y-56 < cam.y+(br+50)/zoom)? head.y+56 : head.y-56;
     g.save();
     g.beginPath(); g.arc(bx,by,br,0,7);
     g.fillStyle='rgba(6,14,12,.82)'; g.fill();
@@ -894,7 +917,7 @@ function loop(ts){
     }
     // 今見えている範囲
     g.strokeStyle='rgba(200,255,230,.4)'; g.lineWidth=1;
-    g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, W*sx, Math.min(mh, H*sy));
+    g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, viewW()*sx, Math.min(mh, viewH()*sy));
     g.restore();
   }
   prevHead.x=head.x; prevHead.y=head.y;
@@ -902,7 +925,7 @@ function loop(ts){
 }
 resize(); scatter(); requestAnimationFrame(loop);
 window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals,path:()=>path,hitMode:()=>HIT_MODE,
-  head:()=>head, cam:()=>cam, straight:()=>straight, turn:()=>turnRate, camVel:()=>camVel, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
+  head:()=>head, cam:()=>cam, zoom:()=>zoom, straight:()=>straight, turn:()=>turnRate, camVel:()=>camVel, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
   bounds:()=>({top:PLAY_TOP,bot:playBot()})};
 </script>
 </body>
