@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>プロバイオティＸ 固める</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0c1013;
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;touch-action:none;overscroll-behavior:none}
+  #c{position:fixed;inset:0;display:block;touch-action:none}
+  #hud{position:fixed;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 9px) 14px 0;
+    pointer-events:none;color:#efe7d6}
+  .row{display:flex;align-items:center;gap:9px;margin-bottom:5px}
+  .lbl{font-size:10px;letter-spacing:.06em;color:#8b8577;width:52px;flex:none;font-weight:700}
+  .bar{position:relative;flex:1;height:11px;border-radius:6px;overflow:hidden;background:#1b1f22}
+  .fill{position:absolute;left:0;top:0;bottom:0;width:0%;border-radius:6px}
+  #sFill{background:linear-gradient(90deg,#d8c99a,#fff8e6)}
+  #nFill{background:linear-gradient(90deg,#6fb0a0,#b9f0dc)}
+  .val{font-size:11px;color:#a89f8c;width:40px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  #msg{position:fixed;left:24px;right:24px;top:32%;text-align:center;color:#f3ecdd;pointer-events:none;
+    background:rgba(10,13,16,.90);border:1px solid #2c3138;border-radius:16px;padding:22px 16px}
+  #msg .big{font-size:25px;font-weight:800;color:#ffeeb8;letter-spacing:.04em}
+  #msg .small{font-size:13px;color:#a9a293;margin-top:10px;line-height:1.85}
+  #ver{position:fixed;right:8px;bottom:calc(env(safe-area-inset-bottom) + 6px);
+    font-size:9.5px;color:#454b52;pointer-events:none}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="row"><div class="lbl">固まった</div><div class="bar"><div class="fill" id="sFill"></div></div>
+    <div class="val" id="sVal">0%</div></div>
+  <div class="row"><div class="lbl">なめらか</div><div class="bar"><div class="fill" id="nFill"></div></div>
+    <div class="val" id="nVal">100%</div></div>
+</div>
+<div id="msg"><div class="big">牛乳を固める</div>
+  <div class="small">指でなぞると<b style="color:#ffeeb8">乳酸菌が広がって酸が出ます</b>。<br>
+  同じ所を二度なでると<b style="color:#ffeeb8">ぷるんと固まります</b>。<br>
+  固まった上を<b>速くこすると崩れる</b>ので、そっと。</div></div>
+<div id="ver">-</div>
+<script>
+const BUILD='v32 (07-28 16:05)';
+document.getElementById('ver').textContent=BUILD;
+
+const _q=new URLSearchParams(location.search);
+const num=(k,d,lo,hi)=>Math.max(lo,Math.min(hi,+(_q.get(k)||d)));
+const SCALE  = num('scale',1,.4,3);
+const BRUSH  = num('brush',30,10,120);     // 指のまわりに酸が届く半径(px)
+const ACIDK  = num('acid',1.4,.1,8);       // 酸の出る速さ
+const BREAK  = num('break',900,80,3000);   // これ以上の速さで固い所をこすると崩れる(px/秒)
+const CELLPX = num('cell',15,6,40);
+
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const jc=document.createElement('canvas');            // 固まった塊だけを描く層
+let jx=null, noiseP=null, shadeG=null, dirty=true, layerT=-9;
+let gx=0,gy=0,gvx=0,gvy=0;                            // 塊全体のぷるぷる
+let W=0,H=0,DPR=1,S=1;
+let CELL=15, COLS=0, ROWS=0, X0=0, Y0=0, GW=0, GH=0;
+let acid,set_,amp,pha,dmg;                  // グリッド
+function resize(){
+  DPR=Math.min(3,window.devicePixelRatio||1);
+  W=window.innerWidth; H=window.innerHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  S=SCALE*Math.max(.75,Math.min(1.6,Math.min(W,H)/375));
+  const pad=13*S, top=76;
+  X0=pad; Y0=top; GW=W-pad*2; GH=H-top-pad;
+  CELL=CELLPX*S;
+  COLS=Math.max(4,Math.floor(GW/CELL)); ROWS=Math.max(4,Math.floor(GH/CELL));
+  CELL=Math.min(GW/COLS, GH/ROWS);
+  X0=(W-CELL*COLS)/2; Y0=top+(GH-CELL*ROWS)/2;
+  const n=COLS*ROWS;
+  acid=new Float32Array(n); set_=new Uint8Array(n);
+  amp=new Float32Array(n); pha=new Float32Array(n); dmg=new Float32Array(n);
+  jc.width=cv.width; jc.height=cv.height;
+  jx=jc.getContext('2d'); jx.setTransform(DPR,0,0,DPR,0,0);
+  shadeG=ctx.createLinearGradient(0,Y0,0,Y0+CELL*ROWS);
+  shadeG.addColorStop(0,'rgba(255,252,240,.85)');
+  shadeG.addColorStop(.55,'rgba(250,243,224,.35)');
+  shadeG.addColorStop(1,'rgba(206,193,163,.40)');
+  if(!noiseP){                                        // ヨーグルト表面のざらつき
+    const nn=document.createElement('canvas'); nn.width=nn.height=64;
+    const n2=nn.getContext('2d');
+    for(let i=0;i<420;i++){
+      n2.fillStyle='rgba(255,255,255,'+(Math.random()*0.05)+')';
+      n2.beginPath(); n2.arc(Math.random()*64,Math.random()*64,Math.random()*2.4,0,6.284); n2.fill();
+      n2.fillStyle='rgba(120,110,88,'+(Math.random()*0.045)+')';
+      n2.beginPath(); n2.arc(Math.random()*64,Math.random()*64,Math.random()*2.0,0,6.284); n2.fill();
+    }
+    noiseP=ctx.createPattern(nn,'repeat');
+  }
+}
+addEventListener('resize',()=>{ resize(); reset(); });
+resize();
+
+/* ── 音 ── */
+let AC=null;
+function ac(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} }
+  if(AC&&AC.state==='suspended') AC.resume(); return AC; }
+function beep(f,dur,type,vol,slide,delay){
+  const a=ac(); if(!a) return;
+  const t=a.currentTime+(delay||0);
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||'sine'; o.frequency.setValueAtTime(f,t);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,f*slide),t+dur);
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(vol||.1,t+.007);
+  g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  o.connect(g); g.connect(a.destination); o.start(t); o.stop(t+dur+.02);
+}
+const SCALE5=[0,2,4,7,9];                        // 五音音階をぐるぐる上がる
+function setSnd(n){                              // ぷるん（固まった瞬間）
+  const st=SCALE5[n%5]+12*(Math.floor(n/5)%3);
+  const f=196*Math.pow(1.0595,st);
+  beep(f,.20,'sine',.16,.55);                    // 低く落ちる＝弾力
+  beep(f*3.02,.07,'sine',.045,1.15);
+}
+function crackSnd(){ beep(130,.16,'sawtooth',.09,.55); beep(240,.09,'square',.03,.7); }
+function doneSnd(){ [0,4,7,12,16].forEach((s,i)=>beep(330*Math.pow(1.0595,s),.5,'sine',.11,.8,i*.075)); }
+
+/* ── 状態 ── */
+let clock=0, done=false, started=false;
+let nSet=0, nBreak=0, combo=0, comboT=0, sndT=0;
+let dragging=false, fx=0, fy=0, px=0, py=0, spd=0;
+let hist=[];
+let cocci=[], bits=[], whey=[];
+
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function idx(i,j){ return j*COLS+i; }
+function cellX(i){ return X0+(i+.5)*CELL; }
+function cellY(j){ return Y0+(j+.5)*CELL; }
+
+function reset(){
+  clock=0; done=false; started=false; nSet=0; nBreak=0; combo=0;
+  cocci=[]; bits=[]; whey=[];
+  acid.fill(0); set_.fill(0); amp.fill(0); pha.fill(0); dmg.fill(0); dirty=true; layerT=-9;
+  const m=document.getElementById('msg'); m.classList.remove('hide');
+  m.innerHTML='<div class="big">牛乳を固める</div><div class="small">'+
+    '指でなぞると<b style="color:#ffeeb8">乳酸菌が広がって酸が出ます</b>。<br>'+
+    '同じ所を二度なでると<b style="color:#ffeeb8">ぷるんと固まります</b>。<br>'+
+    '固まった上を<b>速くこすると崩れる</b>ので、そっと。</div>';
+  updHud();
+}
+
+/* ── 入力 ── */
+function pos(e){ const t=e.touches?e.touches[0]:e; return {x:t.clientX,y:t.clientY}; }
+function down(e){
+  e.preventDefault(); ac();
+  if(done){ reset(); return; }
+  const p=pos(e); fx=px=p.x; fy=py=p.y; dragging=true; spd=0; hist.length=0;
+  if(!started){ started=true; document.getElementById('msg').classList.add('hide'); }
+}
+function move(e){
+  e.preventDefault(); if(!dragging||done) return;
+  const p=pos(e); px=fx; py=fy; fx=p.x; fy=p.y;
+  const d=Math.hypot(fx-px,fy-py);
+  // 速さは直近0.11秒の移動距離から出す（1回だけの飛びで誤爆しない）
+  const now=performance.now();
+  hist.push({t:now,d:d});
+  while(hist.length>1 && now-hist[0].t>110) hist.shift();
+  let sum=0; for(const h of hist) sum+=h.d;
+  const span=Math.max(45, now-hist[0].t);
+  spd=spd*.45 + (sum/(span/1000))*.55;
+  stroke(px,py,fx,fy,d);
+}
+function up(){ dragging=false; }
+cv.addEventListener('touchstart',down,{passive:false});
+cv.addEventListener('touchmove',move,{passive:false});
+cv.addEventListener('touchend',up,{passive:false});
+cv.addEventListener('touchcancel',up,{passive:false});
+cv.addEventListener('mousedown',down);
+addEventListener('mousemove',e=>{ if(dragging) move(e); });
+addEventListener('mouseup',up);
+
+/* 固まった瞬間、そこから波紋が広がる */
+function ripple(i,j,power){
+  const R=6;
+  for(let dj=-R;dj<=R;dj++) for(let di=-R;di<=R;di++){
+    const x=i+di, y=j+dj; if(x<0||y<0||x>=COLS||y>=ROWS) continue;
+    const k=idx(x,y); if(!set_[k]) continue;
+    const d=Math.hypot(di,dj); if(d>R) continue;
+    const a=power*(1-d/R);
+    if(a>amp[k]){ amp[k]=a; pha[k]=-d*0.95; }
+  }
+}
+function setCell(k,i,j){
+  set_[k]=1; nSet++; combo++; comboT=clock; dirty=true;
+  ripple(i,j,.42);
+  gvx+=rnd(-9,9); gvy+=rnd(-11,5);
+  if(clock-sndT>0.055){ sndT=clock; setSnd(combo); }
+  for(let n=0;n<3;n++) bits.push({x:cellX(i)+rnd(-6,6)*S,y:cellY(j)+rnd(-6,6)*S,
+    vx:rnd(-40,40),vy:rnd(-40,40),t:0,life:.45,r:rnd(1,2.4)*S,c:'#fffaea'});
+}
+function breakCell(k,i,j){
+  set_[k]=0; acid[k]=.72; dmg[k]=0; amp[k]=0; nSet--; nBreak++; combo=0; dirty=true;
+  crackSnd();
+  gvx+=rnd(-26,26); gvy+=rnd(-26,26);
+  whey.push({x:cellX(i),y:cellY(j),t:0,life:1.5,r:CELL*.55});
+  for(let n=0;n<7;n++) bits.push({x:cellX(i),y:cellY(j),
+    vx:rnd(-120,120),vy:rnd(-120,120),t:0,life:.6,r:rnd(1.2,2.8)*S,c:'#e6dcc0'});
+}
+
+/* ── なぞる ── */
+function stroke(ax,ay,bx,by,d){
+  const R=BRUSH*S;
+  const n=Math.max(1,Math.ceil(d/(CELL*.6)));
+  for(let s=0;s<n;s++){
+    const t=n===1?0:s/(n-1), x=ax+(bx-ax)*t, y=ay+(by-ay)*t;
+    const i0=Math.max(0,Math.floor((x-R-X0)/CELL)), i1=Math.min(COLS-1,Math.floor((x+R-X0)/CELL));
+    const j0=Math.max(0,Math.floor((y-R-Y0)/CELL)), j1=Math.min(ROWS-1,Math.floor((y+R-Y0)/CELL));
+    for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){
+      const k=idx(i,j);
+      const dd=Math.hypot(cellX(i)-x, cellY(j)-y);
+      if(dd>R) continue;
+      const w=1-dd/R;
+      if(set_[k]){
+        // 固まった所：速くこすると崩れる、ゆっくりなら揺れるだけ
+        if(spd>BREAK*S){
+          dmg[k]+=w*(spd/(BREAK*S)-1)*0.055;
+          dirty=true;
+          if(dmg[k]>1){ breakCell(k,i,j); }
+        }else if(w>.55&&amp[k]<.20){ amp[k]=.20; pha[k]=0; }
+        continue;
+      }
+      // 指が通った芯は即座に固まり、外周はとろみ止まり（もう一度なでて埋める）
+      const core=(dd<R*0.36)?3.2:1;
+      acid[k]+=Math.pow(w,0.8)*core*ACIDK*0.075;
+      if(acid[k]>=1){ setCell(k,i,j); }
+    }
+  }
+  // 指についてくる乳酸菌
+  if(cocci.length<30&&Math.random()<.6)
+    cocci.push({x:bx+rnd(-15,15)*S,y:by+rnd(-15,15)*S,a:rnd(0,6.28),w:rnd(-2.6,2.6),
+                o:rnd(6,22)*S,t:0,life:rnd(.5,1.2),r:rnd(2.2,3.6)*S});
+}
+
+/* ── 更新 ── */
+function update(dt){
+  clock+=dt;
+  if(!dragging) spd*=Math.pow(.02,dt);
+  gvx+=(-gx*46-gvx*5.2)*dt; gvy+=(-gy*46-gvy*5.2)*dt;
+  gx+=gvx*dt; gy+=gvy*dt;
+  const lim=4.5*S, gl=Math.hypot(gx,gy);
+  if(gl>lim){ gx*=lim/gl; gy*=lim/gl; }
+  const dec=Math.pow(.12,dt);
+  for(let k=0;k<amp.length;k++) if(amp[k]>0.0008) amp[k]*=dec; else amp[k]=0;
+  for(let i=bits.length-1;i>=0;i--){ const b=bits[i]; b.t+=dt;
+    b.x+=b.vx*dt; b.y+=b.vy*dt; b.vx*=.92; b.vy*=.92; if(b.t>b.life) bits.splice(i,1); }
+  for(let i=whey.length-1;i>=0;i--){ const w=whey[i]; w.t+=dt; if(w.t>w.life) whey.splice(i,1); }
+  for(let i=cocci.length-1;i>=0;i--){ const c=cocci[i]; c.t+=dt; c.a+=c.w*dt;
+    if(c.t>c.life) cocci.splice(i,1); }
+  if(clock-comboT>1.4) combo=0;
+  if(!done&&started&&nSet>=COLS*ROWS*0.985){ finish(); }
+  updHud();
+}
+function smooth(){ return Math.max(0, 100-Math.round(nBreak/(COLS*ROWS)*100*4)); }
+function updHud(){
+  const p=nSet/(COLS*ROWS)*100;
+  document.getElementById('sFill').style.width=p.toFixed(0)+'%';
+  document.getElementById('sVal').textContent=p.toFixed(0)+'%';
+  document.getElementById('nFill').style.width=smooth()+'%';
+  document.getElementById('nVal').textContent=smooth()+'%';
+}
+function finish(){
+  done=true; dragging=false;
+  for(let j=0;j<ROWS;j++) for(let i=0;i<COLS;i++){
+    const k=idx(i,j); amp[k]=.55; pha[k]=-Math.hypot(i-COLS/2,j-ROWS/2)*.5;
+  }
+  doneSnd();
+  const g=smooth();
+  const rank = g>=95?'絹ごしのようになめらか' : g>=80?'なめらか' : g>=55?'すこし崩れた' : 'ぼろぼろ';
+  const m=document.getElementById('msg'); m.classList.remove('hide');
+  m.innerHTML='<div class="big">かたまった！</div><div class="small">'+
+    'なめらかさ <b style="color:#ffeeb8">'+g+'%</b> ／ 崩した所 <b style="color:#ffeeb8">'+nBreak+'</b><br>'+
+    '<b style="color:#ffeeb8">'+rank+'</b><br>'+
+    '<span style="color:#7d766a">乳酸でpH4.6を切ると、牛乳のカゼインが一斉に固まります。</span>'+
+    '<br><br>タップでもう一度</div>';
+}
+
+/* ── 描画 ── */
+function draw(){
+  ctx.fillStyle='#0c1013'; ctx.fillRect(0,0,W,H);
+  // 容器
+  const r=16*S;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(X0+r,Y0); ctx.arcTo(X0+CELL*COLS,Y0,X0+CELL*COLS,Y0+CELL*ROWS,r);
+  ctx.arcTo(X0+CELL*COLS,Y0+CELL*ROWS,X0,Y0+CELL*ROWS,r);
+  ctx.arcTo(X0,Y0+CELL*ROWS,X0,Y0,r); ctx.arcTo(X0,Y0,X0+CELL*COLS,Y0,r);
+  ctx.closePath();
+  ctx.strokeStyle='#2a3138'; ctx.lineWidth=3*S; ctx.stroke();
+  ctx.clip();
+
+  // 牛乳（まだ液体）
+  const gg=ctx.createLinearGradient(X0,Y0,X0,Y0+CELL*ROWS);
+  gg.addColorStop(0,'#cdd2d6'); gg.addColorStop(1,'#b9c0c6');
+  ctx.fillStyle=gg; ctx.fillRect(X0,Y0,CELL*COLS,CELL*ROWS);
+  // ゆるい対流
+  ctx.save(); ctx.globalAlpha=.18;
+  for(let i=0;i<5;i++){
+    const x=X0+CELL*COLS*(.2+.16*i)+Math.sin(clock*.35+i)*22*S;
+    const y=Y0+CELL*ROWS*(.15+.18*i)+Math.cos(clock*.28+i*1.7)*26*S;
+    const g2=ctx.createRadialGradient(x,y,0,x,y,86*S);
+    g2.addColorStop(0,'#eef1f3'); g2.addColorStop(1,'rgba(238,241,243,0)');
+    ctx.fillStyle=g2; ctx.beginPath(); ctx.arc(x,y,86*S,0,6.284); ctx.fill();
+  }
+  ctx.restore();
+
+  // とろみ（酸が効き始めた所）
+  for(let j=0;j<ROWS;j++) for(let i=0;i<COLS;i++){
+    const k=idx(i,j); if(set_[k]) continue;
+    const a=acid[k]; if(a<.14) continue;
+    const x=cellX(i), y=cellY(j), al=Math.min(.62,(a-.14)*.85);
+    ctx.fillStyle='rgba(250,246,232,'+al+')';
+    const h=(i*73856093^j*19349663)>>>0;
+    for(let n=0;n<3;n++){
+      const ox=((h>>(n*5))&15)/15-.5, oy=((h>>(n*5+4))&15)/15-.5;
+      ctx.beginPath(); ctx.arc(x+ox*CELL*.8, y+oy*CELL*.8, CELL*(.09+.10*a), 0,6.284); ctx.fill();
+    }
+  }
+
+  // 固まった塊（3層で立体感）
+  // 固まった塊（別レイヤーに描いてから、艶と陰影を上から乗せる）
+
+  const isEdge=(i,j)=> i===0||j===0||i===COLS-1||j===ROWS-1
+    || !set_[idx(i-1,j)] || !set_[idx(i+1,j)] || !set_[idx(i,j-1)] || !set_[idx(i,j+1)];
+  if(nSet>0){
+   if(dirty && clock-layerT>0.045){ dirty=false; layerT=clock;
+    const edges=[];
+    let bi0=COLS,bj0=ROWS,bi1=0,bj1=0;
+    for(let j=0;j<ROWS;j++) for(let i=0;i<COLS;i++){
+      if(!set_[idx(i,j)]) continue;
+      if(i<bi0)bi0=i; if(i>bi1)bi1=i; if(j<bj0)bj0=j; if(j>bj1)bj1=j;
+      if(isEdge(i,j)) edges.push(i,j);
+    }
+    const bx=X0+bi0*CELL-CELL, by=Y0+bj0*CELL-CELL,
+          bw=(bi1-bi0+3)*CELL, bh=(bj1-bj0+3)*CELL;
+    jx.clearRect(0,0,W,H);
+    jx.globalCompositeOperation='source-over';
+    jx.fillStyle='#cfc099';                        // 縁（厚みの影）
+    for(let e=0;e<edges.length;e+=2){
+      const i=edges[e], j=edges[e+1];
+      jx.beginPath(); jx.arc(cellX(i),cellY(j),CELL*.92,0,6.284); jx.fill();
+    }
+    jx.fillStyle='#e9dcbd';                        // 本体
+    for(let j=0;j<ROWS;j++){
+      let s0=-1;
+      for(let i=0;i<=COLS;i++){
+        const on=(i<COLS)&&set_[idx(i,j)]&&!isEdge(i,j);
+        if(on&&s0<0) s0=i;
+        if(!on&&s0>=0){ jx.fillRect(X0+s0*CELL-.5, Y0+j*CELL-.5, (i-s0)*CELL+1, CELL+1); s0=-1; }
+      }
+    }
+    for(let e=0;e<edges.length;e+=2){              // 縁は丸く（ぷるんとした輪郭）
+      const i=edges[e], j=edges[e+1];
+      jx.beginPath(); jx.arc(cellX(i),cellY(j),CELL*.82,0,6.284); jx.fill();
+    }
+    // ここから上は塊の内側だけに乗る
+    jx.globalCompositeOperation='source-atop';
+    jx.fillStyle=shadeG; jx.fillRect(bx,by,bw,bh);
+    const hx=X0+CELL*COLS*.34, hy=Y0+CELL*ROWS*.24;   // 光沢
+    const hr=Math.min(CELL*COLS,CELL*ROWS)*.62;
+    const hg=jx.createRadialGradient(hx,hy,0,hx,hy,hr);
+    hg.addColorStop(0,'rgba(255,255,255,.62)'); hg.addColorStop(.40,'rgba(255,255,255,.16)');
+    hg.addColorStop(1,'rgba(255,255,255,0)');
+    jx.fillStyle=hg; jx.beginPath(); jx.arc(hx,hy,hr,0,6.284); jx.fill();
+    jx.save();                                     // 光の筋（つやつやの決め手）
+    jx.translate(hx,hy); jx.rotate(-0.5); jx.scale(1,0.24);
+    const sg2=jx.createRadialGradient(0,0,0,0,0,hr*.55);
+    sg2.addColorStop(0,'rgba(255,255,255,.60)'); sg2.addColorStop(1,'rgba(255,255,255,0)');
+    jx.fillStyle=sg2; jx.beginPath(); jx.arc(0,0,hr*.55,0,6.284); jx.fill();
+    jx.restore();
+    if(noiseP){ jx.fillStyle=noiseP; jx.fillRect(bx,by,bw,bh); }   // きめ
+    jx.globalCompositeOperation='source-over';
+    // 傷
+    for(let j=0;j<ROWS;j++) for(let i=0;i<COLS;i++){
+      const k=idx(i,j); if(!set_[k]||dmg[k]<=.06) continue;
+      jx.fillStyle='rgba(150,138,110,'+Math.min(.5,dmg[k]*.45)+')';
+      jx.beginPath(); jx.arc(cellX(i),cellY(j),CELL*.5,0,6.284); jx.fill();
+    }
+   }
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);      // 等倍で貼る（拡大再サンプルを避ける）
+    ctx.drawImage(jc, gx*DPR, gy*DPR);              // 塊全体がぷるぷる動く
+    ctx.restore();
+  }
+
+  // ホエー（崩れた跡）
+  for(const w of whey){
+    const k=1-w.t/w.life;
+    ctx.fillStyle='rgba(216,206,150,'+(.35*k)+')';
+    ctx.beginPath(); ctx.arc(w.x,w.y,w.r*(1+ (1-k)*1.6),0,6.284); ctx.fill();
+  }
+
+  // 指まわり
+  if(dragging&&!done){
+    const R=BRUSH*S, pu=.6+.4*Math.sin(clock*7);
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    const g3=ctx.createRadialGradient(fx,fy,0,fx,fy,R);
+    g3.addColorStop(0,'rgba(255,240,190,'+(.10+.05*pu)+')');
+    g3.addColorStop(1,'rgba(255,240,190,0)');
+    ctx.fillStyle=g3; ctx.beginPath(); ctx.arc(fx,fy,R,0,6.284); ctx.fill(); ctx.restore();
+    if(spd>BREAK*S){
+      ctx.strokeStyle='rgba(255,150,120,'+(.35+.25*pu)+')'; ctx.lineWidth=2*S;
+      ctx.beginPath(); ctx.arc(fx,fy,R*.8,0,6.284); ctx.stroke();
+    }
+  }
+  for(const c of cocci){
+    const k=1-c.t/c.life;
+    ctx.globalAlpha=Math.max(0,k)*.9; ctx.fillStyle='#8ff0c0';
+    ctx.beginPath(); ctx.arc(c.x+Math.cos(c.a)*c.o*.3, c.y+Math.sin(c.a)*c.o*.3, c.r*(.5+.5*k),0,6.284);
+    ctx.fill(); ctx.globalAlpha=1;
+  }
+  for(const b of bits){
+    ctx.globalAlpha=Math.max(0,1-b.t/b.life); ctx.fillStyle=b.c;
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,6.284); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+
+
+}
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(.05,(now-last)/1000); last=now;
+  update(dt); draw(); requestAnimationFrame(loop);
+}
+reset(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>
