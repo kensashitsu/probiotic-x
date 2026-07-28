@@ -37,7 +37,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v33 (07-28 16:47)';
+const BUILD='v34 (07-28 16:52)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
@@ -256,6 +256,11 @@ const DANGER_R=95;     // 警告に気付き始める距離
 const HAND_R=64;       // この距離まで来たら手の下＝警告を最大にする
 function warnLevel(d){ return Math.max(0, Math.min(1, (DANGER_R-d)/(DANGER_R-HAND_R))); }
 
+// ★盤面が静止していると生き物に見えないので、味方・敵ともゆっくり漂わせる。
+//   速さは「避けようと思えば必ず避けられる」範囲に抑える（毎秒6〜8px＝菌1個分/2秒）。
+//   ぶつかりが運任せになると理不尽になるので、ここは絶対に上げすぎない
+const DRIFT=Math.max(0, Math.min(4, +(_q.get('drift')||1)));
+const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
 const LOUPE_R=+(_q.get('loupeR')||135);  // 手の下にこの距離まで雑菌が来たらルーペを出す
 let loupeA=0;                            // ルーペの表示量（滑らかに出入りする）
 let rods=[];   // {x,y,ang,joined,order,phase}
@@ -274,7 +279,8 @@ function scatter(){
   rods=[];
   const N=rodCount();
   for(let i=0;i<N;i++){
-    rods.push({x:rnd(40,worldW()-40), y:rnd(PLAY_TOP,worldBot()), ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28, vx:0,vy:0,vr:0, doom:0, spent:0, dead:false});
+    rods.push({x:rnd(40,worldW()-40), y:rnd(PLAY_TOP,worldBot()), ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28, vx:0,vy:0,vr:0, doom:0, spent:0, dead:false,
+      wa:rnd(0,6.283), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
   }
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
@@ -285,7 +291,8 @@ function spawnFoe(){
   const spikes=[]; const n=9;
   for(let i=0;i<n;i++) spikes.push(0.75+Math.random()*0.5);
   foes.push({x:rnd(50,worldW()-50), y:rnd(PLAY_TOP+12,worldBot()-12), r:FOE_R*rnd(0.8,1.25), ang:Math.random()*Math.PI*2,
-             phase:Math.random()*6.28, spin:rnd(-0.5,0.5), dead:false, dt:0, spikes});
+             phase:Math.random()*6.28, spin:rnd(-0.5,0.5), dead:false, dt:0, spikes,
+             wa:rnd(0,6.283), ws:rnd(.55,1.45)});
 }
 
 // ---------------- 入力 ----------------
@@ -763,6 +770,32 @@ function loop(ts){
     trimTrail(); checkHit();
   }
 
+
+  // ---- ゆるやかな浮遊（味方・敵の両方）----
+  // 向きは時間でゆっくり曲がる。乱数を毎フレーム引くとブレて見えるので、
+  // 各個体の位相から滑らかに変化させる
+  if(DRIFT>0){
+    const wx=worldW(), yb=worldBot();
+    for(const r of rods){
+      if(r.joined) continue;
+      if(r.vx||r.vy) continue;                 // 弾け飛んだ勢いが残っている間は任せる
+      r.wa+=Math.sin(clock*0.31+r.phase)*dt*0.9;
+      const sp=ROD_DRIFT*r.ws;
+      r.x+=Math.cos(r.wa)*sp*dt; r.y+=Math.sin(r.wa)*sp*dt;
+      r.ang+=(r.spin||0)*dt;                   // ゆっくり向きも変わる
+      if(r.x<24){ r.x=24; r.wa=Math.PI-r.wa; } else if(r.x>wx-24){ r.x=wx-24; r.wa=Math.PI-r.wa; }
+      if(r.y<PLAY_TOP-14){ r.y=PLAY_TOP-14; r.wa=-r.wa; } else if(r.y>yb+14){ r.y=yb+14; r.wa=-r.wa; }
+    }
+    for(const f of foes){
+      if(f.dead) continue;
+      f.wa+=Math.sin(clock*0.27+f.phase)*dt*0.8;
+      const sp=FOE_DRIFT*f.ws;
+      f.x+=Math.cos(f.wa)*sp*dt; f.y+=Math.sin(f.wa)*sp*dt;
+      const m=f.r+6;
+      if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
+      if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
+    }
+  }
 
   g.save();
   if(shake>0.2){ const s=shake; g.translate(rnd(-s,s),rnd(-s,s)); shake*=0.86; } else shake=0;
