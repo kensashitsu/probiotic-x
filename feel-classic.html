@@ -37,7 +37,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v21 (07-28 10:03)';
+const BUILD='v22 (07-28 10:25)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
@@ -89,7 +89,7 @@ const PLAY_TOP=110;
 function playBot(){ return H-120; }
 // ★盤面を画面より広くして、鎖の先頭をカメラが追う。
 //   PC版の「広い画面で走り回れる」自由度は、画面内の縮尺だけでは戻らない
-const WORLD=Math.max(1, Math.min(4, +(_q.get('world')||2)));
+const WORLD=Math.max(1, Math.min(6, +(_q.get('world')||3)));   // 疾走するマップなので広く
 function worldW(){ return W*WORLD; }
 function worldBot(){ return PLAY_TOP + (playBot()-PLAY_TOP)*WORLD; }
 function playArea(){ return worldW()*Math.max(120, worldBot()-PLAY_TOP); }
@@ -108,21 +108,61 @@ function clampCam(){
 //   ・指を止めれば流れも止まる
 //   ・端に押し付けた時は、止まったままでも流し続けられる（追加分）
 let finger={x:0,y:0}, prevFinger={x:0,y:0}, fingerVel={x:0,y:0};
-const FLOW_K=0.62;        // 指の速度のうち、どれだけ世界を流すか
+// ★曲がっている時はスクロールを止める。
+//   これが無いと、輪を描いている間も世界が流れて軌跡が螺旋になり自己交差しない
+//   ＝輪が永久に閉じない（実測：中央で半径70pxの円を描く間にカメラが388px流れて0匹）。
+//   直進＝疾走、曲がる＝囲みに入る、という切り替えはソニック的な走りと丸まりに対応する。
+let turnRate=0, straight=1, strokeT0=-9;
+let dirRef={x:0,y:0,ang:null,t:0};   // 旋回を測る基準点（指の実移動から求める）
+const TURN_LO=2.0, TURN_HI=6.0;      // 旋回の速さ(rad/秒)。これ以上でスクロールを止める
+// 指が実際に動いた分から旋回の速さを求める。平滑化した速度から向きを出すと
+// フレームとタッチイベントのタイミングずれで鈍り、旋回を検出できない
+function feedDir(nx,ny){
+  const d=Math.hypot(nx-dirRef.x, ny-dirRef.y);
+  if(d<5) return;
+  const ang=Math.atan2(ny-dirRef.y, nx-dirRef.x);
+  if(dirRef.ang!=null){
+    let da=ang-dirRef.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+    const dtt=Math.max(0.008, clock-dirRef.t);
+    const inst=Math.abs(da)/dtt;
+    turnRate+=(inst-turnRate)*0.45;
+  }
+  dirRef.ang=ang; dirRef.x=nx; dirRef.y=ny; dirRef.t=clock;
+}
+const FLOW_K=0.50;        // 指の速度のうち、どれだけ世界を流すか（位置による分に上乗せ）
 const FLOW_MIN=230;       // これ以下の速さでは流れない。輪を描く操作(毎秒150〜200px程度)で
                           // 流れてしまうと形が崩れるので、疾走と明確に分ける
-const CAM_DEAD_X=0.18, CAM_DEAD_Y=0.16;   // 中央のこの割合の内側では流れない（輪を描く場所）
+// ★スクロールは「画面中央を過ぎたらすぐ」始まる。中央からの距離に比例して加速し、
+//   端で最大。以前は「デッドゾーンの幅」と「加速の効き幅」が同じ変数だったため、
+//   狭くするとスイッチのように全開になってしまい調整できなかった。式ごと分離した。
+const CAM_DEAD=0.06;      // 中央のごく狭い不感帯（ここだけは流れない）
 // ★端まで行った時の速さは「指で払う速さ」より速くないと、端に着いた瞬間に
 //   減速して壁にぶつかったように感じる（＝走りを阻害される）。
 //   立ち上がりも二次カーブだと手前が効かないので直線にする
 const PAN_MAX=1300;       // 端まで押し付けた時の速さ(px/秒)
 const PAN_CAP=1600;       // 流れる速さの上限(px/秒)
 function followCam(dt){
-  if(!dragging){ fingerVel.x=0; fingerVel.y=0; prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
+  // ★ストローク開始の一瞬は流さない。向きが確定していない段階で流すと、
+  //   実測で最初の0.067秒に72px流れ、その分だけ輪が敵からずれて空振りしていた
+  if(dragging && (clock-strokeT0<0.13 || dirRef.ang==null)){
+    prevFinger.x=finger.x; prevFinger.y=finger.y; return;
+  }
+  if(!dragging){ fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
+    prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
   const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
   prevFinger.x=finger.x; prevFinger.y=finger.y;
   const sm=Math.min(1,dt*14);
   fingerVel.x+=(vx-fingerVel.x)*sm; fingerVel.y+=(vy-fingerVel.y)*sm;
+
+  // 指が止まっている間は旋回の記憶を薄める（曲がり終えたら疾走に戻れる）
+  if(clock-dirRef.t>0.12) turnRate+=(0-turnRate)*Math.min(1,dt*4);
+  // ★「直進していると確認できるまで流さない」。触った瞬間や小さな操作では
+  //   流れない＝囲みの取りこぼしが起きない。まっすぐ走り出した時だけ流れる。
+  //   これが無いとストローク開始の一瞬で数十px流れ、輪が閉じなくなる
+  // 曲がっている時だけ止める。速度で門をかけると端に押し付けて流せなくなる
+  const st=1-Math.min(1,Math.max(0,(turnRate-TURN_LO)/(TURN_HI-TURN_LO)));
+  // 曲がり始めは即座に止め、直進に戻る時はゆっくり戻す（囲みの取りこぼしを防ぐ）
+  straight+=(st-straight)*Math.min(1, dt*(st<straight? 30:5));
 
   let cx=0, cy=0;
   const sp=Math.hypot(fingerVel.x,fingerVel.y);
@@ -130,13 +170,17 @@ function followCam(dt){
     const g=(sp-FLOW_MIN)/sp*FLOW_K;
     cx+=fingerVel.x*g; cy+=fingerVel.y*g;
   }
-  const mx=W*CAM_DEAD_X, my=H*CAM_DEAD_Y;   // 端に押し付けた分（止めたままでも流せる）
-  let ox=0, oy=0;
-  if(finger.x<mx) ox=(finger.x-mx)/mx; else if(finger.x>W-mx) ox=(finger.x-(W-mx))/mx;
-  if(finger.y<my) oy=(finger.y-my)/my; else if(finger.y>H-my) oy=(finger.y-(H-my))/my;
-  ox=Math.max(-1,Math.min(1,ox)); oy=Math.max(-1,Math.min(1,oy));
-  cx+=ox*PAN_MAX; cy+=oy*PAN_MAX;   // デッドゾーンの外は距離に比例して直線的に加速
+  // 中央からの距離（-1〜1）に比例して流す。中央を少し過ぎた所から効き始める
+  const shape=v=>{
+    const a=Math.abs(v);
+    if(a<CAM_DEAD) return 0;
+    const t=Math.min(1,(a-CAM_DEAD)/(1-CAM_DEAD));
+    return (v<0?-1:1)*t;
+  };
+  cx+=shape((finger.x-W/2)/(W/2))*PAN_MAX;
+  cy+=shape((finger.y-H/2)/(H/2))*PAN_MAX;
 
+  cx*=straight; cy*=straight;        // 曲がっている間は流れない＝輪が閉じられる
   const tot=Math.hypot(cx,cy);
   if(tot>PAN_CAP){ cx=cx/tot*PAN_CAP; cy=cy/tot*PAN_CAP; }
   cam.x+=cx*dt; cam.y+=cy*dt;
@@ -198,6 +242,7 @@ let clock=0;   // 経過秒。軌跡の各点の生成時刻に使う
 // 挟まないと、世界の端でカメラが止まった後も先頭だけが外へ走り、画面外に置き去りになる
 function pos(e){const r=cv.getBoundingClientRect();
   finger.x=e.clientX-r.left; finger.y=e.clientY-r.top;   // カメラの流れに使う
+  feedDir(finger.x, finger.y);                            // 旋回の検出
   const x=finger.x+cam.x, y=finger.y+cam.y;
   return{ x:Math.max(6, Math.min(worldW()-6, x)),
           y:Math.max(PLAY_TOP-6, Math.min(worldBot()+6, y)) };}
@@ -209,6 +254,9 @@ function start(x,y){
   rods.forEach(r=>{r.joined=false;});
   dragging=true; path=[{x,y,t:clock}]; head={x,y}; prevHead={x,y};
   orderSeq=0; joinedCount=0; sealCooldown=0;
+  // カメラは「向きが確定してから」流す。初動で流すと輪が敵からずれて空振りする
+  straight=0; turnRate=0; strokeT0=clock;
+  dirRef={x:finger.x, y:finger.y, ang:null, t:clock};
   ac(); catchNear(x,y);
 }
 function moveTo(x,y){
@@ -249,9 +297,24 @@ function pointInPoly(px,py,poly){
   }
   return inside;
 }
+// ★輪の成立は「自己交差」だけに頼らない。疾走しながら囲むと世界が流れるため
+//   軌跡は螺旋になり、厳密な交差はまず起きない（実測：一度も閉じなかった）。
+//   通ってきた線の近くまで戻ってきたら閉じる、という緩い判定を足す。
+const CLOSE_R=38;
 function checkClose(){
   const n=path.length; if(n<8) return;
   const a=path[n-2], b=path[n-1];      // 最新セグメント
+  // 近づいたら閉じる（古い点＝大きく囲めた方を優先）
+  for(let i=0;i<n-8;i++){
+    if(Math.hypot(b.x-path[i].x, b.y-path[i].y)<CLOSE_R){
+      const poly=[]; for(let k=i;k<n;k++) poly.push(path[k]);
+      if(polyArea(poly)<1400) break;
+      doSeal(poly);
+      path=[{x:b.x,y:b.y,t:clock}];
+      sealCooldown=0.2;
+      return;
+    }
+  }
   for(let i=0;i<n-3;i++){
     const c=path[i], d=path[i+1];
     const X=segInt(a,b,c,d);
@@ -791,7 +854,7 @@ function loop(ts){
 
   // ミニマップ：広い世界のどこに何が居るかを把握するための最小限の表示
   if(WORLD>1 && _q.get('map')!=='0'){
-    const mw=58, mh=Math.round(mw*(worldBot()-PLAY_TOP)/worldW()), mx=10, my=100;
+    const mw=70, mh=Math.round(mw*(worldBot()-PLAY_TOP)/worldW()), mx=10, my=100;
     g.save();
     g.fillStyle='rgba(10,16,20,.55)'; g.strokeStyle='rgba(140,240,200,.22)'; g.lineWidth=1;
     g.beginPath(); g.rect(mx,my,mw,mh); g.fill(); g.stroke();
@@ -817,7 +880,7 @@ function loop(ts){
 }
 resize(); scatter(); requestAnimationFrame(loop);
 window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals,path:()=>path,hitMode:()=>HIT_MODE,
-  head:()=>head, cam:()=>cam, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
+  head:()=>head, cam:()=>cam, straight:()=>straight, turn:()=>turnRate, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
   bounds:()=>({top:PLAY_TOP,bot:playBot()})};
 </script>
 </body>
