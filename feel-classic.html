@@ -37,7 +37,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v20 (07-28 09:57)';
+const BUILD='v21 (07-28 10:03)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
@@ -111,9 +111,12 @@ let finger={x:0,y:0}, prevFinger={x:0,y:0}, fingerVel={x:0,y:0};
 const FLOW_K=0.62;        // 指の速度のうち、どれだけ世界を流すか
 const FLOW_MIN=230;       // これ以下の速さでは流れない。輪を描く操作(毎秒150〜200px程度)で
                           // 流れてしまうと形が崩れるので、疾走と明確に分ける
-const CAM_DEAD_X=0.22, CAM_DEAD_Y=0.20;
-const PAN_MAX=520;        // 端に押し付けた時の追加分(px/秒)
-const PAN_CAP=900;        // 流れる速さの上限(px/秒)
+const CAM_DEAD_X=0.18, CAM_DEAD_Y=0.16;   // 中央のこの割合の内側では流れない（輪を描く場所）
+// ★端まで行った時の速さは「指で払う速さ」より速くないと、端に着いた瞬間に
+//   減速して壁にぶつかったように感じる（＝走りを阻害される）。
+//   立ち上がりも二次カーブだと手前が効かないので直線にする
+const PAN_MAX=1300;       // 端まで押し付けた時の速さ(px/秒)
+const PAN_CAP=1600;       // 流れる速さの上限(px/秒)
 function followCam(dt){
   if(!dragging){ fingerVel.x=0; fingerVel.y=0; prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
   const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
@@ -132,8 +135,7 @@ function followCam(dt){
   if(finger.x<mx) ox=(finger.x-mx)/mx; else if(finger.x>W-mx) ox=(finger.x-(W-mx))/mx;
   if(finger.y<my) oy=(finger.y-my)/my; else if(finger.y>H-my) oy=(finger.y-(H-my))/my;
   ox=Math.max(-1,Math.min(1,ox)); oy=Math.max(-1,Math.min(1,oy));
-  const ease=v=>(v<0?-1:1)*v*v;
-  cx+=ease(ox)*PAN_MAX; cy+=ease(oy)*PAN_MAX;
+  cx+=ox*PAN_MAX; cy+=oy*PAN_MAX;   // デッドゾーンの外は距離に比例して直線的に加速
 
   const tot=Math.hypot(cx,cy);
   if(tot>PAN_CAP){ cx=cx/tot*PAN_CAP; cy=cy/tot*PAN_CAP; }
