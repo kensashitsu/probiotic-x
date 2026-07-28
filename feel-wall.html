@@ -32,10 +32,13 @@
   #over .s{font-size:14px;color:#bfe9d2;margin-bottom:20px;line-height:1.8}
   #over button{font:inherit;font-size:15px;font-weight:800;color:#0b0f14;background:#8ff0c0;border:0;
     border-radius:999px;padding:12px 26px}
+  #ver{position:fixed;left:8px;bottom:5px;font-size:10px;letter-spacing:.02em;
+    color:#41525b;z-index:20;pointer-events:none;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
 <canvas id="cv"></canvas>
+<div id="ver"></div>
 <div id="hud">
   <div class="row">守った <b id="sec">0</b> 秒</div>
   <div class="best" id="best"></div>
@@ -51,6 +54,9 @@
 
 <script>
 'use strict';
+// 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
+const BUILD='v20 (07-28 09:57)';
+try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 // ============================================================
 //  案1「酸の壁を築く」
 //  ・腐敗は"点の敵"ではなく、角度ごとの侵食半径 rot[] が中心へ迫る"面"。

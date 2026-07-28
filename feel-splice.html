@@ -23,16 +23,22 @@
   #tip{position:absolute;top:calc(env(safe-area-inset-top) + 74px);left:0;right:0;text-align:center;
     font-size:12px;line-height:1.5;color:#6f7d84;padding:0 14px;
     z-index:5;pointer-events:none;transition:opacity .4s}
+  #ver{position:fixed;left:8px;bottom:5px;font-size:10px;letter-spacing:.02em;
+    color:#41525b;z-index:20;pointer-events:none;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
 <canvas id="cv"></canvas>
+<div id="ver"></div>
 <div id="hud"><div class="n">封じた <b id="cnt">0</b></div><div class="best" id="best"></div></div>
 <div id="tip">短くなぞって指を離してOK。頭の近くを触り直せば続けられる</div>
 <button id="reset">まき直す</button>
 
 <script>
 'use strict';
+// 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
+const BUILD='v20 (07-28 09:57)';
+try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
 let W,H,DPR;
