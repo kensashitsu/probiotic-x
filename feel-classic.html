@@ -11,18 +11,42 @@
     font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;color:#eee;
     touch-action:none;overscroll-behavior:none}
   canvas{position:absolute;inset:0;width:100%;height:100dvh;display:block}
-  #hud{position:absolute;top:calc(env(safe-area-inset-top) + 12px);left:0;right:0;text-align:center;
-    pointer-events:none;z-index:5}
-  #hud .n{font-size:15px;color:#bfe9d2;letter-spacing:.04em}
-  #hud .n b{font-size:26px;color:#8ff0c0;font-weight:800}
-  #hud .best{font-size:12px;color:#7a8a86;margin-top:2px}
   /* 下部は手が被って死角になるので、操作以外のUIは全て上に寄せる */
-  #reset{position:absolute;top:calc(env(safe-area-inset-top) + 12px);right:12px;
-    font:inherit;font-size:12px;font-weight:700;color:#0b0f14;background:#8ff0c0;border:0;border-radius:999px;
-    padding:7px 14px;z-index:6}
-  #tip{position:absolute;top:calc(env(safe-area-inset-top) + 74px);left:0;right:0;text-align:center;
+  #hud{position:absolute;top:calc(env(safe-area-inset-top) + 9px);left:11px;right:11px;
+    pointer-events:none;z-index:5}
+  /* 押し合いゲージ：左＝乳酸（味方）／右＝腐敗（敵）。境界が押し合う */
+  #bar{position:relative;height:24px;border-radius:12px;overflow:hidden;
+    background:linear-gradient(90deg,#4a2f2a,#7a4a38);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.10), 0 2px 10px rgba(0,0,0,.45)}
+  #barL{position:absolute;left:0;top:0;bottom:0;width:50%;
+    background:linear-gradient(90deg,#2f9c78,#8ff0c0)}
+  #barMid{position:absolute;top:-2px;bottom:-2px;left:50%;width:3px;margin-left:-1.5px;
+    background:#fff;box-shadow:0 0 8px rgba(255,255,255,.85)}
+  #bar .cap{position:absolute;top:0;bottom:0;display:flex;align-items:center;
+    font-size:11px;font-weight:800;letter-spacing:.08em}
+  #bar .cl{left:9px;color:#08281e}
+  #bar .cr{right:9px;color:#ffd8c8}
+  #nums{display:flex;align-items:center;gap:9px;margin-top:5px;font-size:11px;color:#7f8f95;
+    font-variant-numeric:tabular-nums}
+  #nums b{color:#bfe9d2;font-weight:800;font-size:12.5px}
+  #nums .foodname{color:#cfe8dd;font-weight:800;font-size:12px;letter-spacing:.06em}
+  #nums .s2 b{color:#ea9ec0}
+  #nums .tm b{font-size:14px;color:#bfe9d2}
+  #nums .s3{margin-left:auto}
+  #reset{pointer-events:auto;font:inherit;font-size:10.5px;font-weight:700;color:#9fb3ac;
+    background:rgba(255,255,255,.07);border:0;border-radius:999px;padding:4px 10px}
+  #tip{position:absolute;top:calc(env(safe-area-inset-top) + 66px);left:0;right:0;text-align:center;
     font-size:12px;line-height:1.5;color:#6f7d84;padding:0 14px;
     z-index:5;pointer-events:none;transition:opacity .4s}
+  /* 決着 */
+  #over{position:absolute;left:24px;right:24px;top:30%;z-index:9;text-align:center;
+    background:rgba(7,12,15,.93);border:1px solid #26343c;border-radius:18px;padding:24px 18px;
+    display:none}
+  #over.show{display:block}
+  #over .ttl{font-size:27px;font-weight:800;letter-spacing:.04em}
+  #over .sub{font-size:13px;color:#9fb3ac;margin-top:10px;line-height:1.9}
+  #again{margin-top:16px;font:inherit;font-size:14px;font-weight:800;color:#0b0f14;background:#8ff0c0;
+    border:0;border-radius:999px;padding:10px 22px}
   #ver{position:fixed;left:8px;bottom:5px;font-size:10px;letter-spacing:.02em;
     color:#41525b;z-index:20;pointer-events:none;font-variant-numeric:tabular-nums}
 </style>
@@ -30,17 +54,37 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="ver"></div>
-<div id="hud"><div class="n">封じた <b id="cnt">0</b></div><div class="best" id="best"></div></div>
-<div id="tip">なぞって乳酸菌（桿菌）を繋ぎ 雑菌（ブドウ球菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
-<button id="reset">まき直す</button>
+<div id="hud">
+  <div id="bar">
+    <div id="barL"></div>
+    <div id="barMid"></div>
+    <div class="cap cl">乳酸</div><div class="cap cr">腐敗</div>
+  </div>
+  <div id="nums">
+    <span class="foodname" id="foodname">ぬか床</span>
+    <span class="tm">残り <b id="tleft">90</b></span>
+    <span class="s1">乳酸菌 <b id="nAlly">0</b></span>
+    <span class="s2">腐敗菌 <b id="nFoe">0</b></span>
+    <span class="s3">溶かした <b id="cnt">0</b></span>
+    <button id="reset">やり直す</button>
+  </div>
+</div>
+<div id="tip">なぞって乳酸菌（桿菌）を繋ぎ 腐敗菌（ブドウ球菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
+<div id="over"><div class="ttl" id="overTtl"></div><div class="sub" id="overSub"></div>
+  <button id="again">もう一度</button></div>
 
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v34 (07-28 16:52)';
+const BUILD='v35 (07-28 17:21)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
-const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
+const elCnt=document.getElementById('cnt');
+const elAlly=document.getElementById('nAlly'), elFoe=document.getElementById('nFoe');
+const elBarL=document.getElementById('barL'), elBarMid=document.getElementById('barMid');
+const elTime=document.getElementById('tleft');
+const elOver=document.getElementById('over'), elOverT=document.getElementById('overTtl'),
+      elOverS=document.getElementById('overSub');
 let W,H,DPR;
 function resize(){
   DPR=Math.min(2,window.devicePixelRatio||1);
@@ -263,6 +307,38 @@ const DRIFT=Math.max(0, Math.min(4, +(_q.get('drift')||1)));
 const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
 const LOUPE_R=+(_q.get('loupeR')||135);  // 手の下にこの距離まで雑菌が来たらルーペを出す
 let loupeA=0;                            // ルーペの表示量（滑らかに出入りする）
+// ============================================================
+//  目的：フィールドは「食品」。乳酸と腐敗が1本のゲージで押し合い、
+//  その割合は"生きている乳酸菌の数"と"腐敗菌の数"の比でリアルタイムに動く。
+//  乳酸側がゲージを完全に支配したらクリア＝漬かった。押し切られたら腐った。
+//  ※こじつけを避けるため、実際の発酵と同じ「基質の取り合い」にしている：
+//    腐敗菌は自分で増え、増えるたびに近くの乳酸菌を1匹押しのける（場所と栄養を奪う）。
+//    乳酸菌もゆっくり分裂して戻る。倒した数だけ湧き直す旧仕様では敵が永久に減らず、
+//    ゲージが構造的に進まないので廃止した。
+// ============================================================
+// ★数値は机上シミュレーションで決めた（撃破速度ごとの決着時間を目標に探索）。
+//   放置=73秒で腐る／8匹分=152秒で腐る／15匹分=312秒で漬かる／25匹分=124秒／40匹分=67秒。
+//   腕前がそのまま結果に出る幅になっている
+const FOE_GROW =+(_q.get('fgrow')||0.30);   // 腐敗菌の分裂の速さ（匹/秒の基準値）
+const FOE_CAP_K=+(_q.get('fcap')||2.4);     // 腐敗菌の上限＝初期数の何倍か
+const ALLY_GROW=+(_q.get('agrow')||1.6);    // 乳酸菌の分裂の速さ（酸が優勢な時ほど速い）
+const ALLY_LOSS=+(_q.get('aloss')||0.12);   // 腐敗に押されて乳酸菌が減る速さ
+const GAUGE_P  =+(_q.get('gp')||3);         // ゲージの効き。大きいほど数の差が大きく振れる
+const GAUGE_SPD=+(_q.get('gspd')||0.16);    // ゲージが動く最大速度（割合/秒）
+// ★ナワバリバトル方式：制限時間内にゲージをどれだけ自分側へ押し込めたかで勝敗。
+//   途中で完全に押し切ったらノックアウト（完封）で即終了。
+//   これが無いと拮抗したまま延々終わらない（実測：自動プレイで240秒決着せず）
+const TIME_LIMIT=+(_q.get('time')||90);
+const WIN_AT=0.94, LOSE_AT=0.06;            // 途中で押し切ったら完封
+const STEAL_R  =120;                        // 腐敗菌が増える時、この範囲の乳酸菌を2匹奪う
+// ★pH＝ゲージそのものを増殖率に効かせる。酸性に傾くほど腐敗菌は増えられず、
+//   乳酸菌は増えやすい。これが無いと両者が釣り合ったまま決着が付かない（実測で400秒無決着）。
+//   実際の発酵でも、pHが下がり切ると腐敗菌は増殖できなくなる＝こじつけではない
+function foeSuppress(){ return 0.35+1.4*(1-gauge); }
+function allyBoost(){ return gauge; }
+function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n; }
+let ally0=1, foe0=1, gauge=0.5, phase='play', playT=0;
+let foeAcc=0, allyAcc=0, allyKillAcc=0;
 let rods=[];   // {x,y,ang,joined,order,phase}
 let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
 let bits=[];   // 溶けカス粒子
@@ -285,7 +361,22 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  updateHud();
+  ally0=rods.length; foe0=foes.length; allyKillAcc=0; gauge=0.5; phase='play'; playT=0;
+  foeAcc=0; allyAcc=0; loupeA=0;
+  elOver.classList.remove('show');
+  document.getElementById('tip').style.opacity=1;
+  updateHud(); updateBar();
+}
+// 腐敗に押しのけられた乳酸菌を1匹消す（掴んでいる桿菌は奪われない）
+function killAllyNear(x,y,R){
+  let bi=-1, bd=R;
+  for(let i=0;i<rods.length;i++){ const r=rods[i];
+    if(r.joined||r.dying!=null) continue;
+    const d=Math.hypot(r.x-x,r.y-y); if(d<bd){ bd=d; bi=i; } }
+  if(bi<0) return false;
+  const r=rods[bi]; r.dying=0.35;
+  for(let i=0;i<5;i++) bits.push({x:r.x,y:r.y, vx:rnd(-.7,.7),vy:rnd(-.9,.2), life:.8, r:rnd(.9,2.0)});
+  return true;
 }
 function spawnFoe(){
   const spikes=[]; const n=9;
@@ -312,6 +403,7 @@ function pos(e){const r=cv.getBoundingClientRect();
 //   ユーザー評「違和感があり、手が邪魔になっていた修正前よりミスが多発する」。
 //   → 操作は指の直下（直接タッチ）に戻し、手の死角は"見せ方"だけで補う
 function start(x,y){
+  if(phase!=='play') return;
   rods.forEach(r=>{r.joined=false;});
   dragging=true; path=[{x,y,t:clock}]; head={x,y}; prevHead={x,y};
   orderSeq=0; joinedCount=0; sealCooldown=0;
@@ -332,6 +424,7 @@ function catchNear(x,y){
   for(const r of rods){
     if(r.joined) continue;
     if(r.spent>0) continue;          // 消耗中は酸を出せない＝拾えない
+    if(r.dying!=null) continue;      // 消えかけは掴めない
     if(Math.hypot(r.x-x,r.y-y)<=CATCH_R){
       r.joined=true; r.order=orderSeq++; joinedCount++;
       r.doom=0; r.vx=0; r.vy=0; r.vr=0;   // 救出＝餓死タイマー解除
@@ -414,14 +507,47 @@ function doSeal(poly){
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
     updateHud();
     fizz(sealed, joinedCount);
-    for(let i=0;i<sealed;i++) setTimeout(spawnFoe, 600+i*130);
+    // ※倒した分を湧き直させない。腐敗菌は自分で増えるのが唯一の供給源なので、
+    //   押し切れば本当に減っていく＝ゲージが進む
     if(sealed>=3) tipMsg(sealed+'匹まとめて溶かした！');
   }else{
     fizz(0, joinedCount);
   }
 }
+function updateBar(){
+  const p=(gauge*100);
+  elBarL.style.width=p.toFixed(1)+'%';
+  elBarMid.style.left=p.toFixed(1)+'%';
+}
+function finishGame(win,how){
+  phase= win? 'win':'lose';
+  dragging=false; activeId=null;
+  const pc=Math.round(gauge*100);
+  elTime.textContent='0';
+  if(win){
+    elOverT.textContent = how==='ko'? '完封！' : '漬かった！';
+    elOverT.style.color='#8ff0c0';
+    elOverS.innerHTML='<span style="font-size:19px;color:#8ff0c0;font-weight:800">乳酸 '+pc+'%</span>'+
+      '<span style="color:#6f7d84"> : </span><span style="font-size:19px;color:#e78ab0;font-weight:800">腐敗 '+(100-pc)+'%</span><br>'+
+      '溶かした腐敗菌 <b style="color:#8ff0c0">'+totalSealed+'</b>'+
+      (how==='ko'? '（時間内に完全支配）':'')+'<br>'+
+      '<span style="color:#6f7d84">乳酸でpHが下がると、腐敗菌は増えられなくなります。</span>';
+    if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
+  }else{
+    elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
+    elOverT.style.color='#ff9a80';
+    elOverS.innerHTML='<span style="font-size:19px;color:#8ff0c0;font-weight:800">乳酸 '+pc+'%</span>'+
+      '<span style="color:#6f7d84"> : </span><span style="font-size:19px;color:#e78ab0;font-weight:800">腐敗 '+(100-pc)+'%</span><br>'+
+      '溶かした腐敗菌 <b style="color:#ffb9a6">'+totalSealed+'</b><br>'+
+      '<span style="color:#6f7d84">腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</span>';
+  }
+  elOver.classList.add('show');
+}
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
-function updateHud(){ elCnt.textContent=totalSealed; elBest.textContent= best? 'これまで最多 '+best : ''; }
+function updateHud(){
+  elCnt.textContent=totalSealed;
+  elAlly.textContent=livingRods(); elFoe.textContent=foes.filter(f=>!f.dead).length;
+}
 
 // --- 鎖が腐敗菌に触れたら四散（両側リスク）---
 // ★当たりの範囲を選べる。既定は「指先だけが危険」。
@@ -507,7 +633,8 @@ cv.addEventListener('touchend',touchOff,{passive:false});
 cv.addEventListener('touchcancel',touchOff,{passive:false});
 // アプリが背面に回った時も握りを解く（戻った時に鎖が固まったままになるのを防ぐ）
 document.addEventListener('visibilitychange',()=>{ if(document.hidden){ activeId=null; end(); } });
-document.getElementById('reset').addEventListener('click',()=>{scatter();document.getElementById('tip').style.opacity=1;});
+document.getElementById('reset').addEventListener('click',()=>{scatter();});
+document.getElementById('again').addEventListener('click',()=>{scatter();});
 
 // ---- 酸の帯を尾から蒸発させる ----
 // 古い点を先頭から捨てる。ただし鎖が追従に使う長さ分は age を無視して残す（団子防止）
@@ -771,6 +898,72 @@ function loop(ts){
   }
 
 
+  // ---- 勢力の増減（食品の中の取り合い）----
+  if(phase==='play'){
+    playT+=dt;
+    const nF=foes.filter(f=>!f.dead).length, nA=livingRods();
+    // ① 腐敗菌が分裂して増える（酸が弱いほど速い／混みすぎると鈍る）
+    if(nF>0){
+      const cap=Math.max(4, foe0*FOE_CAP_K);
+      foeAcc += FOE_GROW*(nF/Math.max(1,foe0))*Math.max(0,1-nF/cap)*foeSuppress()*dt;
+      while(foeAcc>=1){
+        foeAcc-=1;
+        const src=foes.filter(f=>!f.dead);
+        const par=src[(Math.random()*src.length)|0];
+        if(par){
+          const a=rnd(0,6.283), d=rnd(18,46);
+          spawnFoe(); const nf=foes[foes.length-1];
+          nf.x=Math.max(par.r+8, Math.min(worldW()-par.r-8, par.x+Math.cos(a)*d));
+          nf.y=Math.max(PLAY_TOP+par.r+8, Math.min(worldBot()-par.r-8, par.y+Math.sin(a)*d));
+          nf.r=par.r*rnd(.85,1.05); nf.born=clock;
+          for(let k=0;k<2;k++) killAllyNear(nf.x,nf.y,STEAL_R);   // 居場所を奪う
+        }
+      }
+    }
+    // ② 腐敗が優勢な間、乳酸菌はじわじわ死ぬ（基質を奪われる）
+    allyKillAcc += ALLY_LOSS*(nF/Math.max(1,foe0))*(1-gauge)*nA*dt;
+    while(allyKillAcc>=1){ allyKillAcc-=1;
+      const src=foes.filter(f=>!f.dead);
+      const f0=src[(Math.random()*src.length)|0];
+      if(f0) killAllyNear(f0.x,f0.y,260); else break;
+    }
+    // ③ 乳酸菌も分裂して戻る（酸が優勢な時ほど速い）
+    if(nA<ally0){
+      allyAcc += ALLY_GROW*allyBoost()*ally0*(1-nA/ally0)*dt;
+      let guard=0;
+      while(allyAcc>=1 && livingRods()<ally0 && guard++<40){
+        allyAcc-=1;
+        const src=rods.filter(r=>!r.joined&&!r.dying);
+        const par=src.length? src[(Math.random()*src.length)|0] : rods[0];
+        if(!par) break;
+        const a=rnd(0,6.283), d=rnd(14,34);
+        rods.push({x:Math.max(24,Math.min(worldW()-24,par.x+Math.cos(a)*d)),
+                   y:Math.max(PLAY_TOP,Math.min(worldBot(),par.y+Math.sin(a)*d)),
+                   ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28,
+                   vx:0,vy:0,vr:0, doom:0, spent:0, dead:false, born:clock,
+                   wa:rnd(0,6.283), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
+      }
+      if(allyAcc>2) allyAcc=2;
+    }
+    // ④ ゲージ＝数の比。急に飛ばず、押し合うように動く
+    const A=nA/Math.max(1,ally0), F=nF/Math.max(1,foe0);
+    const target=(A<=0)?0:(F<=0?1:Math.pow(A,GAUGE_P)/(Math.pow(A,GAUGE_P)+Math.pow(F,GAUGE_P)));
+    const step=GAUGE_SPD*dt;
+    gauge += Math.max(-step, Math.min(step, target-gauge));
+    if(gauge>1) gauge=1; if(gauge<0) gauge=0;
+    updateBar();
+    const left=Math.max(0,TIME_LIMIT-playT);
+    elTime.textContent=Math.ceil(left);
+    elTime.style.color= left<=10? '#ff9a80' : '#bfe9d2';
+    if(gauge>=WIN_AT) finishGame(true,'ko');
+    else if(gauge<=LOSE_AT || nA===0) finishGame(false,'ko');
+    else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
+    updateHud();
+  }
+  // 消えかけの乳酸菌を薄くして消す（毎フレーム大量に入れ替わるので、点滅して見えないように）
+  for(let i=rods.length-1;i>=0;i--){ const r=rods[i];
+    if(r.dying!=null){ r.dying-=dt; if(r.dying<=0) rods.splice(i,1); } }
+
   // ---- ゆるやかな浮遊（味方・敵の両方）----
   // 向きは時間でゆっくり曲がる。乱数を毎フレーム引くとブレて見えるので、
   // 各個体の位相から滑らかに変化させる
@@ -907,6 +1100,8 @@ function loop(ts){
       r.blink=(r.blink||0)+dt*rate;
       alpha=0.30+0.70*(0.5+0.5*Math.sin(r.blink)); // 0.30〜1.0 で明滅（元の色のまま）
     }
+    if(r.dying!=null) alpha*=Math.max(0,r.dying/0.35);
+    else if(r.born!=null && clock-r.born<0.35) alpha*=Math.max(0,(clock-r.born)/0.35);
     drawRod(r.x,r.y,r.ang+wob,false,alpha,weak);
   }
   rods=rods.filter(r=>!r.dead);
