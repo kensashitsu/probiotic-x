@@ -37,7 +37,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v22 (07-28 10:25)';
+const BUILD='v23 (07-28 10:34)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
@@ -113,6 +113,14 @@ let finger={x:0,y:0}, prevFinger={x:0,y:0}, fingerVel={x:0,y:0};
 //   ＝輪が永久に閉じない（実測：中央で半径70pxの円を描く間にカメラが388px流れて0匹）。
 //   直進＝疾走、曲がる＝囲みに入る、という切り替えはソニック的な走りと丸まりに対応する。
 let turnRate=0, straight=1, strokeT0=-9;
+// ★流れに慣性を持たせる。指を端に置き続けないと流れない仕組みだと、走り続ける間
+//   ずっと指が端にあり、その先は構造的に見えない＝「先が見えない」の根本原因。
+//   勢いをつけたら指を中央に戻しても流れが続くようにすれば、指を中央に置いたまま
+//   走れて、進行方向に画面の半分が見える。ソニックの「加速して惰性で走る」に対応。
+let camVel={x:0,y:0};
+const ACC_UP=7;     // 加速の速さ
+const ACC_COAST=1.1;// 指を戻した後の惰性（小さいほど長く流れ続ける）
+const ACC_BRAKE=14; // 曲がった時の制動（囲みのために素早く止める）
 let dirRef={x:0,y:0,ang:null,t:0};   // 旋回を測る基準点（指の実移動から求める）
 const TURN_LO=2.0, TURN_HI=6.0;      // 旋回の速さ(rad/秒)。これ以上でスクロールを止める
 // 指が実際に動いた分から旋回の速さを求める。平滑化した速度から向きを出すと
@@ -124,8 +132,11 @@ function feedDir(nx,ny){
   if(dirRef.ang!=null){
     let da=ang-dirRef.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
     const dtt=Math.max(0.008, clock-dirRef.t);
-    const inst=Math.abs(da)/dtt;
-    turnRate+=(inst-turnRate)*0.45;
+    // ★瞬間値に上限をかける。指を中央へ戻す動き（180度の方向転換）は瞬間的に
+    //   100rad/秒相当になり、これを旋回と見なすと惰性が即座に殺される。
+    //   上限をかけて「continuously 曲がっている時だけ」制動がかかるようにする
+    const inst=Math.min(12, Math.abs(da)/dtt);
+    turnRate+=(inst-turnRate)*0.30;
   }
   dirRef.ang=ang; dirRef.x=nx; dirRef.y=ny; dirRef.t=clock;
 }
@@ -148,6 +159,7 @@ function followCam(dt){
     prevFinger.x=finger.x; prevFinger.y=finger.y; return;
   }
   if(!dragging){ fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
+    camVel.x=0; camVel.y=0;
     prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
   const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
   prevFinger.x=finger.x; prevFinger.y=finger.y;
@@ -183,7 +195,13 @@ function followCam(dt){
   cx*=straight; cy*=straight;        // 曲がっている間は流れない＝輪が閉じられる
   const tot=Math.hypot(cx,cy);
   if(tot>PAN_CAP){ cx=cx/tot*PAN_CAP; cy=cy/tot*PAN_CAP; }
-  cam.x+=cx*dt; cam.y+=cy*dt;
+
+  // 慣性：加速は速く、指を戻した後は惰性で流れ続け、曲がった時は素早く止まる
+  const want=Math.hypot(cx,cy), now=Math.hypot(camVel.x,camVel.y);
+  const acc = (straight<0.45) ? ACC_BRAKE : (want>now ? ACC_UP : ACC_COAST);
+  const k=Math.min(1,dt*acc);
+  camVel.x+=(cx-camVel.x)*k; camVel.y+=(cy-camVel.y)*k;
+  cam.x+=camVel.x*dt; cam.y+=camVel.y*dt;
   clampCam();
 }
 function inView(x,y,m){ m=m||60;
@@ -255,7 +273,7 @@ function start(x,y){
   dragging=true; path=[{x,y,t:clock}]; head={x,y}; prevHead={x,y};
   orderSeq=0; joinedCount=0; sealCooldown=0;
   // カメラは「向きが確定してから」流す。初動で流すと輪が敵からずれて空振りする
-  straight=0; turnRate=0; strokeT0=clock;
+  straight=0; turnRate=0; strokeT0=clock; camVel.x=0; camVel.y=0;
   dirRef={x:finger.x, y:finger.y, ang:null, t:clock};
   ac(); catchNear(x,y);
 }
@@ -880,7 +898,7 @@ function loop(ts){
 }
 resize(); scatter(); requestAnimationFrame(loop);
 window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals,path:()=>path,hitMode:()=>HIT_MODE,
-  head:()=>head, cam:()=>cam, straight:()=>straight, turn:()=>turnRate, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
+  head:()=>head, cam:()=>cam, straight:()=>straight, turn:()=>turnRate, camVel:()=>camVel, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
   bounds:()=>({top:PLAY_TOP,bot:playBot()})};
 </script>
 </body>
