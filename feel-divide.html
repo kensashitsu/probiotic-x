@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>プロバイオティＸ 分裂編</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;touch-action:none;overscroll-behavior:none}
+  #c{position:fixed;inset:0;display:block;touch-action:none}
+  #hud{position:fixed;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 8px) 12px 0;
+    pointer-events:none;color:#dff7ec}
+  .row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .lbl{font-size:10px;letter-spacing:.06em;color:#7a8a86;width:46px;flex:none;font-weight:700}
+  .bar{position:relative;flex:1;height:12px;border-radius:6px;overflow:hidden;background:#16222b}
+  .fill{position:absolute;left:0;top:0;bottom:0;width:0%;border-radius:6px}
+  #tband{position:absolute;top:0;bottom:0;background:rgba(120,240,180,.20);
+    border-left:1px solid rgba(140,255,200,.45);border-right:1px solid rgba(140,255,200,.45)}
+  #tdead{position:absolute;top:0;bottom:0;right:0;background:rgba(255,90,90,.18)}
+  #tmark{position:absolute;top:-2px;bottom:-2px;width:3px;border-radius:2px;background:#fff;
+    box-shadow:0 0 8px rgba(255,255,255,.8)}
+  #gfill{background:linear-gradient(90deg,#e8c46a,#ffe9a8)}
+  .val{font-size:11px;color:#9fb3ac;width:52px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  #stats{display:flex;gap:14px;font-size:11.5px;color:#8fa8a0;margin-top:2px;font-variant-numeric:tabular-nums}
+  #stats b{color:#8ff0c0;font-size:14px;font-weight:800}
+  #msg{position:fixed;left:22px;right:22px;top:34%;text-align:center;color:#dff7ec;pointer-events:none;
+    background:rgba(8,13,17,.86);border:1px solid #24333d;border-radius:16px;padding:22px 16px}
+  #msg .big{font-size:26px;font-weight:800;color:#8ff0c0;letter-spacing:.04em}
+  #msg .small{font-size:13px;color:#9fb3ac;margin-top:10px;line-height:1.8}
+  #ver{position:fixed;right:8px;bottom:calc(env(safe-area-inset-bottom) + 6px);
+    font-size:9.5px;color:#3b4a52;pointer-events:none}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="row"><div class="lbl">温度</div>
+    <div class="bar"><div id="tband"></div><div id="tdead"></div><div id="tmark"></div></div>
+    <div class="val" id="tval">20℃</div></div>
+  <div class="row"><div class="lbl">グルコース</div>
+    <div class="bar"><div class="fill" id="gfill"></div></div>
+    <div class="val" id="gval">100</div></div>
+  <div id="stats"><span>菌数 <b id="sCells">0</b></span><span>最長 <b id="sLong">0</b></span><span>pH <b id="sPh">6.6</b></span></div>
+</div>
+<div id="msg"><div class="big">指でなぞる</div>
+  <div class="small">なぞると培地が温まります。<br>至適温度になると菌がくびれます。<br>光ったら、その上をなぞって切る。</div></div>
+<div id="ver">-</div>
+<script>
+const BUILD='v28 (07-28 14:25)';
+document.getElementById('ver').textContent=BUILD;
+
+/* ─────────── 設定（?param= で調整可能） ─────────── */
+const _q=new URLSearchParams(location.search);
+const num=(k,d,lo,hi)=>Math.max(lo,Math.min(hi,+(_q.get(k)||d)));
+const SCALE_Q   = num('scale',1,.5,2);
+const HEAT_K    = num('heat',0.033,.005,.1);   // 1px なぞる毎の昇温
+const COOL_K    = num('cool',1.10,.1,4);       // 冷却係数（外気20℃へ）
+const T_AMB     = 20;
+const T_OPT     = 41;                          // 至適のピーク
+const T_LO      = 36, T_HI = 46;               // 緑帯
+const T_DEAD    = 54;                          // これを超えると失活
+const T_MAX     = 62;                          // ゲージ上限
+const MAT_K     = num('mat',0.55,.1,2);        // 至適での分裂速度（/秒）
+const G_START   = num('glu',140,20,400);
+const G_SPLIT   = num('gsplit',1.6,0,10);      // 分裂1回のコスト
+const G_BASE    = num('gbase',0.45,0,5);       // 基礎消費（/秒）
+const G_HEAT    = num('gheat',0.035,0,1);      // 温度による追加消費
+const SUGAR_N   = num('sugar',5,0,20), SUGAR_GAIN = num('sgain',3,0,40);
+const COLONIES  = num('col',6,1,14);
+
+/* ─────────── canvas ─────────── */
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+let W=0,H=0,DPR=1,S=1;
+function resize(){
+  DPR=Math.min(3,window.devicePixelRatio||1);
+  W=window.innerWidth; H=window.innerHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  S=SCALE_Q*Math.max(.75,Math.min(1.5,Math.min(W,H)/375));
+}
+addEventListener('resize',resize); resize();
+
+const FIELD=()=>({x0:16*S, y0:96, x1:W-16*S, y1:H-24});
+
+/* ─────────── 音 ─────────── */
+let AC=null;
+function ac(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} }
+  if(AC&&AC.state==='suspended') AC.resume(); return AC; }
+function beep(freq,dur,type,vol,slide){
+  const a=ac(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||'sine'; o.frequency.setValueAtTime(freq,a.currentTime);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,freq*slide),a.currentTime+dur);
+  g.gain.setValueAtTime(0,a.currentTime);
+  g.gain.linearRampToValueAtTime(vol||.12,a.currentTime+.008);
+  g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+dur);
+  o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur+.02);
+}
+function splitSnd(n){ const f=520*Math.pow(1.0595,Math.min(24,n)); beep(f,.14,'triangle',.14,1.6); beep(f*2,.06,'sine',.05,1.2); }
+function sugarSnd(){ beep(880,.08,'sine',.09,1.5); beep(1320,.07,'sine',.05,1.4); }
+function deadSnd(){ beep(150,.3,'sawtooth',.12,.4); }
+function readySnd(){ beep(1180,.05,'sine',.045,1.05); }
+
+/* ─────────── 状態 ─────────── */
+let temp=T_AMB, glucose=G_START, clock=0, over=false, started=false;
+let colonies=[], sugars=[], bits=[], acid=0, splits=0, combo=0, comboT=0;
+let heatFlash=0;
+
+function rnd(a,b){ return a+Math.random()*(b-a); }
+
+function newColony(){
+  const f=FIELD();
+  const type=Math.random()<0.55?'cocci':'rod';
+  const x=rnd(f.x0+40*S,f.x1-40*S), y=rnd(f.y0+40*S,f.y1-40*S);
+  const c={type,mat:0,ready:false,cells:[],dir:rnd(0,Math.PI*2),phase:rnd(0,6.28),
+           flash:0,hurt:0};
+  c.cells.push({x,y,a:c.dir});
+  return c;
+}
+function cellLen(c){ return (c.type==='cocci'? 15: 24)*S; }
+function cellRad(c){ return (c.type==='cocci'? 8.5: 6.6)*S; }
+
+function tip(c){ return c.cells[c.cells.length-1]; }
+
+function grow(c){
+  const t=tip(c), f=FIELD();
+  c.dir+=rnd(-.45,.45);
+  // 縁に向かっていたら中央へ寄せる
+  const cxm=(f.x0+f.x1)/2, cym=(f.y0+f.y1)/2;
+  const m=34*S;
+  if(t.x<f.x0+m||t.x>f.x1-m||t.y<f.y0+m||t.y>f.y1-m){
+    c.dir=Math.atan2(cym-t.y,cxm-t.x)+rnd(-.4,.4);
+  }
+  const step=cellLen(c)*(c.type==='cocci'?1.0:1.02);
+  c.cells.push({x:t.x+Math.cos(c.dir)*step, y:t.y+Math.sin(c.dir)*step, a:c.dir, born:clock});
+}
+
+function reset(){
+  temp=T_AMB; glucose=G_START; clock=0; over=false; started=false;
+  colonies=[]; sugars=[]; bits=[]; acid=0; splits=0; combo=0; comboT=0;
+  for(let i=0;i<COLONIES;i++) colonies.push(newColony());
+  for(let i=0;i<SUGAR_N;i++) sugars.push(newSugar());
+  document.getElementById('msg').classList.remove('hide');
+  document.getElementById('msg').innerHTML=
+    '<div class="big">指でなぞる</div><div class="small">なぞると培地が温まります。<br>'+
+    '至適温度になると菌がくびれます。<br>光ったら、その上をなぞって切る。</div>';
+}
+function newSugar(){
+  const f=FIELD();
+  return {x:rnd(f.x0+20*S,f.x1-20*S), y:rnd(f.y0+20*S,f.y1-20*S), r:7*S, ph:rnd(0,6.28), got:0};
+}
+
+/* ─────────── 入力 ─────────── */
+let dragging=false, fx=0, fy=0, px=0, py=0;
+function pos(e){
+  const t=e.touches?e.touches[0]:e;
+  return {x:t.clientX, y:t.clientY};
+}
+function down(e){
+  e.preventDefault(); ac();
+  if(over){ reset(); return; }
+  const p=pos(e); fx=px=p.x; fy=py=p.y; dragging=true;
+  if(!started){ started=true; document.getElementById('msg').classList.add('hide'); }
+}
+function move(e){
+  e.preventDefault(); if(!dragging||over) return;
+  const p=pos(e); px=fx; py=fy; fx=p.x; fy=p.y;
+  stroke(px,py,fx,fy);
+}
+function up(e){ dragging=false; }
+cv.addEventListener('touchstart',down,{passive:false});
+cv.addEventListener('touchmove',move,{passive:false});
+cv.addEventListener('touchend',up,{passive:false});
+cv.addEventListener('touchcancel',up,{passive:false});
+cv.addEventListener('mousedown',down);
+addEventListener('mousemove',e=>{ if(dragging) move(e); });
+addEventListener('mouseup',up);
+
+/* 線分と点の距離 */
+function segDist(ax,ay,bx,by,px_,py_){
+  const dx=bx-ax, dy=by-ay, L=dx*dx+dy*dy;
+  let t=L?((px_-ax)*dx+(py_-ay)*dy)/L:0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px_-(ax+dx*t), py_-(ay+dy*t));
+}
+
+/* なぞり：温め＋切る＋糖を拾う（1本の線が全部やる） */
+function stroke(ax,ay,bx,by){
+  const d=Math.hypot(bx-ax,by-ay);
+  temp+=d*HEAT_K;                                   // 擦れば温まる（Ｚの動詞）
+  if(temp>T_DEAD) heatFlash=1;
+  // 切る（Ｙの動詞）
+  for(const c of colonies){
+    if(!c.ready) continue;
+    const t=tip(c);
+    if(segDist(ax,ay,bx,by,t.x,t.y) < cellLen(c)*0.85+8*S){ doSplit(c); }
+  }
+  // 糖を拾う
+  for(const s of sugars){
+    if(s.got) continue;
+    if(segDist(ax,ay,bx,by,s.x,s.y) < s.r+10*S){
+      s.got=1; glucose=Math.min(G_START,glucose+SUGAR_GAIN); sugarSnd();
+      for(let i=0;i<8;i++) bits.push({x:s.x,y:s.y,vx:rnd(-70,70),vy:rnd(-70,70),t:0,c:'#ffe9a8',r:2.5*S});
+      setTimeout(()=>{ const n=newSugar(); s.x=n.x; s.y=n.y; s.got=0; }, 6000);
+    }
+  }
+}
+
+function doSplit(c){
+  c.mat=0; c.ready=false; c.flash=1;
+  grow(c);
+  splits++; combo++; comboT=clock;
+  acid += (c.type==='rod'?1.6:1.0);
+  glucose-=G_SPLIT;
+  splitSnd(combo);
+  const t=tip(c), p=c.cells[c.cells.length-2];
+  for(let i=0;i<10;i++){
+    bits.push({x:(t.x+p.x)/2,y:(t.y+p.y)/2,vx:rnd(-110,110),vy:rnd(-110,110),t:0,
+      c:c.type==='rod'?'#9fe8ff':'#8ff0c0',r:rnd(1.5,3)*S});
+  }
+  updHud();
+}
+
+/* ─────────── 更新 ─────────── */
+function matRate(){
+  const g=Math.exp(-Math.pow((temp-T_OPT)/7,2));
+  return (temp>T_DEAD?0:MAT_K*g);
+}
+function update(dt){
+  clock+=dt;
+  if(over) return;
+  temp -= (temp-T_AMB)*COOL_K*dt;
+  if(temp<T_AMB) temp=T_AMB;
+  heatFlash=Math.max(0,heatFlash-dt*2);
+
+  if(started){
+    glucose -= (G_BASE + Math.max(0,temp-T_AMB)*G_HEAT)*dt;
+    if(glucose<=0){ glucose=0; endGame(); }
+  }
+  if(clock-comboT>1.6) combo=0;
+
+  const r=matRate();
+  for(const c of colonies){
+    c.flash=Math.max(0,c.flash-dt*2.6);
+    c.hurt=Math.max(0,c.hurt-dt*2);
+    if(temp>T_DEAD){                       // 失活：熱すぎると菌が死ぬ
+      c.deadT=(c.deadT||0)+dt;
+      if(c.deadT>0.85){ c.deadT=0; c.hurt=1;
+        if(c.cells.length>1){ const d=c.cells.pop();
+          for(let i=0;i<8;i++) bits.push({x:d.x,y:d.y,vx:rnd(-90,90),vy:rnd(-90,90),t:0,c:'#ff8f8f',r:2*S});
+          deadSnd(); updHud();
+        }
+      }
+      c.mat=Math.max(0,c.mat-dt*.6); c.ready=false;
+      continue;
+    }
+    c.deadT=0;
+    if(!c.ready){
+      const before=c.mat;
+      c.mat=Math.min(1, c.mat + r*dt*(c.type==='rod'?0.78:1));
+      if(before<1&&c.mat>=1){ c.ready=true; readySnd(); }
+    }
+  }
+  for(let i=bits.length-1;i>=0;i--){
+    const b=bits[i]; b.t+=dt; b.x+=b.vx*dt; b.y+=b.vy*dt; b.vx*=.93; b.vy*=.93;
+    if(b.t>.6) bits.splice(i,1);
+  }
+}
+
+function totalCells(){ let n=0; for(const c of colonies) n+=c.cells.length; return n; }
+function longest(){ let n=0; for(const c of colonies) n=Math.max(n,c.cells.length); return n; }
+function ph(){ return Math.max(3.6, 6.6 - acid*0.028); }
+
+function updHud(){
+  document.getElementById('sCells').textContent=totalCells();
+  document.getElementById('sLong').textContent=longest();
+  document.getElementById('sPh').textContent=ph().toFixed(1);
+}
+function updGauges(){
+  const bar=document.getElementById('tmark').parentElement;
+  const w=bar.clientWidth||1;
+  const p=v=>Math.max(0,Math.min(1,(v-T_AMB)/(T_MAX-T_AMB)));
+  document.getElementById('tband').style.left=(p(T_LO)*100)+'%';
+  document.getElementById('tband').style.width=((p(T_HI)-p(T_LO))*100)+'%';
+  document.getElementById('tdead').style.left=(p(T_DEAD)*100)+'%';
+  document.getElementById('tdead').style.width=((1-p(T_DEAD))*100)+'%';
+  document.getElementById('tmark').style.left=(p(temp)*w-1.5)+'px';
+  const tv=document.getElementById('tval');
+  tv.textContent=temp.toFixed(0)+'℃';
+  tv.style.color = temp>T_DEAD?'#ff8f8f' : (temp>=T_LO&&temp<=T_HI?'#8ff0c0':'#9fb3ac');
+  document.getElementById('gfill').style.width=(glucose/G_START*100)+'%';
+  document.getElementById('gval').textContent=Math.ceil(glucose);
+}
+
+function endGame(){
+  over=true; dragging=false;
+  const m=document.getElementById('msg');
+  m.classList.remove('hide');
+  m.innerHTML='<div class="big">発酵おわり</div><div class="small">'+
+    '菌数 <b style="color:#8ff0c0">'+totalCells()+'</b> ／ 最長の鎖 <b style="color:#8ff0c0">'+longest()+'</b><br>'+
+    'pH <b style="color:#8ff0c0">'+ph().toFixed(1)+'</b>'+(ph()<4.5?'（腐敗菌は増えられない）':'（まだ腐敗菌が増えられる）')+'<br>'+
+    '<span style="color:#6f8188">グルコースを使い切りました</span><br><br>タップでもう一度</div>';
+}
+
+/* ─────────── 描画 ─────────── */
+function drawFace(x,y,a,r,mood,scaleX){
+  // 顔は常に正面（鎖の向きで顔が横倒しになると読みにくい）
+  ctx.save(); ctx.translate(x,y); ctx.rotate(Math.PI/2);
+  const ex=r*0.30*(scaleX||1), ey=r*0.34;
+  ctx.fillStyle='#0d1a16';
+  if(mood==='ready'){
+    ctx.lineWidth=Math.max(1,r*.16); ctx.strokeStyle='#0d1a16'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(ex-r*.16,-ey-r*.13); ctx.lineTo(ex+r*.16,-ey+r*.13);
+    ctx.moveTo(ex-r*.16,-ey+r*.13); ctx.lineTo(ex+r*.16,-ey-r*.13);
+    ctx.moveTo(ex-r*.16, ey-r*.13); ctx.lineTo(ex+r*.16, ey+r*.13);
+    ctx.moveTo(ex-r*.16, ey+r*.13); ctx.lineTo(ex+r*.16, ey-r*.13); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ex+r*.42,0,r*.16,0,6.284); ctx.fill();
+  }else if(mood==='hurt'){
+    ctx.lineWidth=Math.max(1,r*.15); ctx.strokeStyle='#0d1a16'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(ex-r*.15,-ey); ctx.lineTo(ex+r*.15,-ey);
+    ctx.moveTo(ex-r*.15, ey); ctx.lineTo(ex+r*.15, ey); ctx.stroke();
+  }else{
+    ctx.beginPath(); ctx.arc(ex,-ey,r*.155,0,6.284); ctx.arc(ex, ey,r*.155,0,6.284); ctx.fill();
+    ctx.lineWidth=Math.max(1,r*.13); ctx.strokeStyle='#0d1a16'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.arc(r*.34,0,r*.26,-0.9,0.9); ctx.stroke();
+  }
+  ctx.restore();
+}
+function capsule(x,y,a,len,rad){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(a);
+  const h=Math.max(0,len/2-rad);
+  ctx.beginPath();
+  ctx.arc(-h,0,rad,Math.PI/2,Math.PI*1.5);
+  ctx.arc( h,0,rad,-Math.PI/2,Math.PI/2);
+  ctx.closePath(); ctx.restore();
+}
+function drawColony(c){
+  const rad=cellRad(c), len=cellLen(c);
+  const sway=(i)=>Math.sin(clock*1.6+c.phase+i*0.7)*1.2*S;
+  // つながり線
+  ctx.strokeStyle=c.type==='rod'?'rgba(120,200,230,.30)':'rgba(120,240,190,.30)';
+  ctx.lineWidth=rad*0.9; ctx.lineCap='round'; ctx.beginPath();
+  for(let i=0;i<c.cells.length;i++){
+    const p=c.cells[i], nx=Math.cos(p.a+Math.PI/2), ny=Math.sin(p.a+Math.PI/2);
+    const x=p.x+nx*sway(i), y=p.y+ny*sway(i);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  for(let i=0;i<c.cells.length;i++){
+    const p=c.cells[i], last=(i===c.cells.length-1);
+    const nx=Math.cos(p.a+Math.PI/2), ny=Math.sin(p.a+Math.PI/2);
+    const x=p.x+nx*sway(i), y=p.y+ny*sway(i);
+    let L=len, mood='normal';
+    if(last){
+      L=len*(1+0.55*c.mat);                       // くびれて伸びる
+      if(c.ready) mood='ready';
+    }
+    if(c.hurt>0&&last) mood='hurt';
+    const grown=p.born!==undefined?Math.min(1,(clock-p.born)*4):1;
+    const pop=1+0.35*(1-grown)*(1-grown);
+
+    if(c.ready&&last){
+      const pu=0.5+0.5*Math.sin(clock*9);
+      ctx.save(); ctx.globalCompositeOperation='lighter';
+      const g=ctx.createRadialGradient(x,y,0,x,y,L*0.95);
+      g.addColorStop(0,'rgba(160,255,215,'+(0.30+0.20*pu)+')');
+      g.addColorStop(1,'rgba(160,255,215,0)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,L*0.95,0,6.284); ctx.fill();
+      ctx.restore();
+    }
+
+    const body=c.type==='rod'?'#7fd4f0':'#7fe8bd';
+    const edge=c.type==='rod'?'#bdeeff':'#c9ffe6';
+    ctx.fillStyle=c.flash>0&&last?'#ffffff':body;
+    ctx.strokeStyle=edge; ctx.lineWidth=1.2*S;
+    capsule(x,y,p.a,L*pop,rad*pop); ctx.fill(); ctx.stroke();
+
+    // くびれ（分裂の隔壁）
+    if(last&&c.mat>0.35){
+      const w=(c.mat-0.35)/0.65;
+      ctx.save(); ctx.translate(x,y); ctx.rotate(p.a);
+      ctx.strokeStyle='rgba(11,15,20,'+(0.25+0.55*w)+')';
+      ctx.lineWidth=Math.max(1,rad*0.5*w);
+      ctx.beginPath(); ctx.moveTo(0,-rad*(1-0.15*w)); ctx.lineTo(0,rad*(1-0.15*w)); ctx.stroke();
+      ctx.restore();
+      drawFace(x-Math.cos(p.a)*L*0.24, y-Math.sin(p.a)*L*0.24, p.a, rad*0.95, mood);
+      drawFace(x+Math.cos(p.a)*L*0.24, y+Math.sin(p.a)*L*0.24, p.a, rad*0.95, mood);
+    }else{
+      drawFace(x,y,p.a,rad,mood);
+    }
+  }
+}
+function draw(){
+  // 背景（酸性になるほど色が寄る）
+  const a=Math.min(1,acid/60);
+  ctx.fillStyle='rgb('+Math.round(11+10*a)+','+Math.round(15+4*a)+','+Math.round(20-4*a)+')';
+  ctx.fillRect(0,0,W,H);
+  const f=FIELD();
+  ctx.strokeStyle='rgba(80,140,120,'+(0.12+0.10*a)+')'; ctx.lineWidth=1;
+  ctx.strokeRect(f.x0,f.y0,f.x1-f.x0,f.y1-f.y0);
+
+  // 温度のもや
+  const warm=Math.max(0,Math.min(1,(temp-T_AMB)/(T_DEAD-T_AMB)));
+  if(warm>0.02){
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    ctx.fillStyle='rgba('+(temp>T_DEAD?255:255)+','+(temp>T_DEAD?90:190)+',120,'+(0.02+0.05*warm+heatFlash*0.10)+')';
+    ctx.fillRect(0,0,W,H); ctx.restore();
+  }
+
+  for(const s of sugars){ if(s.got) continue;
+    const pu=0.5+0.5*Math.sin(clock*3+s.ph);
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    const g=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.r*3);
+    g.addColorStop(0,'rgba(255,220,140,'+(0.20+0.12*pu)+')'); g.addColorStop(1,'rgba(255,220,140,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(s.x,s.y,s.r*3,0,6.284); ctx.fill(); ctx.restore();
+    ctx.fillStyle='#ffe9a8'; ctx.beginPath();
+    for(let i=0;i<6;i++){ const an=i/6*6.284+clock*0.5;
+      const x=s.x+Math.cos(an)*s.r, y=s.y+Math.sin(an)*s.r; i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+    ctx.closePath(); ctx.fill();
+  }
+
+  for(const c of colonies) drawColony(c);
+
+  for(const b of bits){
+    ctx.globalAlpha=Math.max(0,1-b.t/.6); ctx.fillStyle=b.c;
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,6.284); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  if(temp>T_DEAD&&!over){
+    ctx.fillStyle='rgba(255,120,120,'+(0.55+0.45*Math.sin(clock*8))+')';
+    ctx.font='700 '+(13*S)+'px system-ui'; ctx.textAlign='center';
+    ctx.fillText('熱すぎる！菌が死ぬ', W/2, f.y0+22*S);
+  }else if(temp<T_LO&&started&&!over){
+    ctx.fillStyle='rgba(150,190,210,.55)';
+    ctx.font='700 '+(13*S)+'px system-ui'; ctx.textAlign='center';
+    ctx.fillText('冷たい：もっと擦って温める', W/2, f.y0+22*S);
+  }
+  if(combo>=3&&!over){
+    ctx.fillStyle='rgba(143,240,192,.85)'; ctx.textAlign='center';
+    ctx.font='800 '+(20*S)+'px system-ui';
+    ctx.fillText(combo+' 連続', W/2, H-30*S);
+  }
+}
+
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(.05,(now-last)/1000); last=now;
+  update(dt); draw(); updGauges();
+  requestAnimationFrame(loop);
+}
+reset(); updHud(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>
