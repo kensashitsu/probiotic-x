@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>プロバイオティＸ 酸で塗る</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0a0d11;
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;touch-action:none;overscroll-behavior:none}
+  #c{position:fixed;inset:0;display:block;touch-action:none}
+  #hud{position:fixed;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 9px) 13px 0;
+    pointer-events:none;color:#dff7ec}
+  .row{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+  .lbl{font-size:10px;letter-spacing:.06em;color:#7a8a86;width:34px;flex:none;font-weight:700}
+  .bar{position:relative;flex:1;height:11px;border-radius:6px;overflow:hidden;background:#161f26}
+  .fill{position:absolute;left:0;top:0;bottom:0;width:0%;border-radius:6px;transition:width .12s linear}
+  #aFill{background:linear-gradient(90deg,#4fd6a0,#a9ffdc)}
+  #rFill{background:linear-gradient(90deg,#7a5a3a,#c98a6a)}
+  .val{font-size:11px;color:#9fb3ac;width:38px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  #msg{position:fixed;left:24px;right:24px;top:33%;text-align:center;color:#dff7ec;pointer-events:none;
+    background:rgba(7,11,14,.88);border:1px solid #23323b;border-radius:16px;padding:22px 16px}
+  #msg .big{font-size:25px;font-weight:800;color:#8ff0c0;letter-spacing:.04em}
+  #msg .small{font-size:13px;color:#9fb3ac;margin-top:10px;line-height:1.85}
+  #ver{position:fixed;right:8px;bottom:calc(env(safe-area-inset-bottom) + 6px);
+    font-size:9.5px;color:#3b4a52;pointer-events:none}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="row"><div class="lbl">乳酸</div><div class="bar"><div class="fill" id="aFill"></div></div>
+    <div class="val" id="aVal">0%</div></div>
+  <div class="row"><div class="lbl">腐敗</div><div class="bar"><div class="fill" id="rFill"></div></div>
+    <div class="val" id="rVal">0%</div></div>
+</div>
+<div id="msg"><div class="big">指でなぞる</div>
+  <div class="small">なぞった所が<b style="color:#8ff0c0">その場で酸性</b>になります。<br>
+  腐敗のシミは、上をなぞれば溶けます。<br>ゆっくりなぞるほど濃く塗れます。</div></div>
+<div id="ver">-</div>
+<script>
+const BUILD='v31 (07-28 15:23)';
+document.getElementById('ver').textContent=BUILD;
+
+const _q=new URLSearchParams(location.search);
+const num=(k,d,lo,hi)=>Math.max(lo,Math.min(hi,+(_q.get(k)||d)));
+const SCALE   = num('scale',1,.4,3);
+const BRUSH   = num('brush',30,8,120);      // 塗りの太さ(px)
+const FADE    = num('fade',22,2,300);       // 酸が薄れる半減期(秒)
+const ROT_R   = num('rotrate',1.5,.2,10);   // 腐敗の湧く間隔(秒)
+const ROT_G   = num('rotgrow',5.2,.5,40);   // 腐敗の広がる速さ(px/秒)
+const ERODE   = num('erode',95,10,400);     // 塗って溶かす速さ(px/秒)
+const LOSE    = num('lose',34,5,100);       // 腐敗率がこれ%でおしまい
+
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+let W=0,H=0,DPR=1,S=1;
+let acid=null, ac2=null, AW=0, AH=0;        // 酸のレイヤー（半分の解像度）
+let tiny=null, tc=null;                     // 面積を測る用の極小キャンバス
+function resize(){
+  DPR=Math.min(3,window.devicePixelRatio||1);
+  W=window.innerWidth; H=window.innerHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  S=SCALE*Math.max(.75,Math.min(1.6,Math.min(W,H)/375));
+  const old=acid;
+  AW=Math.ceil(W/2); AH=Math.ceil(H/2);
+  acid=document.createElement('canvas'); acid.width=AW; acid.height=AH;
+  ac2=acid.getContext('2d',{willReadFrequently:true});
+  if(old) ac2.drawImage(old,0,0,AW,AH);
+  if(!tiny){ tiny=document.createElement('canvas'); tiny.width=44; tiny.height=78;
+             tc=tiny.getContext('2d',{willReadFrequently:true}); }
+}
+addEventListener('resize',resize); resize();
+
+/* ── 音 ── */
+let AC=null;
+function ac(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} }
+  if(AC&&AC.state==='suspended') AC.resume(); return AC; }
+function beep(f,dur,type,vol,slide){
+  const a=ac(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||'sine'; o.frequency.setValueAtTime(f,a.currentTime);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,f*slide),a.currentTime+dur);
+  g.gain.setValueAtTime(0,a.currentTime);
+  g.gain.linearRampToValueAtTime(vol||.1,a.currentTime+.006);
+  g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+dur);
+  o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur+.02);
+}
+function paintSnd(streak){                     // 新しい所を塗った瞬間（音程が上がる）
+  const f=430*Math.pow(1.0595,Math.min(19,streak));
+  beep(f,.075,'triangle',.055,1.18); beep(f*2.01,.045,'sine',.02,1.1);
+}
+function popSnd(n){ const f=300*Math.pow(1.0595,Math.min(14,n));
+  beep(f,.20,'sine',.13,2.3); beep(f*.5,.16,'triangle',.07,1.5); }
+function rotSnd(){ beep(96,.34,'sawtooth',.055,.72); }
+
+/* ── 状態 ── */
+let clock=0, over=false, started=false;
+let rots=[], bits=[], cocci=[];
+let cover=0, rotPct=0, streak=0, streakT=0, killed=0;
+let dragging=false, fx=0, fy=0, px=0, py=0, seg=null, sampleT=0;
+let settled=[], paintDist=0, sweep=0;
+
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function acidAt(x,y){                          // その点がもう酸性かどうか（0-255）
+  const d=ac2.getImageData(Math.max(0,Math.min(AW-1,x/2|0)),
+                           Math.max(0,Math.min(AH-1,y/2|0)),1,1).data;
+  return d[3];
+}
+function newRot(){
+  for(let i=0;i<14;i++){
+    const x=rnd(20*S,W-20*S), y=rnd(78,H-16);
+    if(acidAt(x,y)>70) continue;               // 酸の中には湧けない
+    return {x,y,r:3*S,max:rnd(46,78)*S,ph:rnd(0,6.28),born:clock,
+            lobes:[0,1,2,3,4].map(k=>({a:rnd(0,6.28),d:rnd(.25,.62),s:rnd(.5,.85)}))};
+  }
+  return null;
+}
+function reset(){
+  clock=0; over=false; started=false; rots=[]; bits=[]; cocci=[]; settled=[]; paintDist=0;
+  cover=0; rotPct=0; streak=0; killed=0;
+  ac2.clearRect(0,0,AW,AH);
+  for(let i=0;i<3;i++){ const r=newRot(); if(r) rots.push(r); }
+  const m=document.getElementById('msg');
+  m.classList.remove('hide');
+  m.innerHTML='<div class="big">指でなぞる</div><div class="small">'+
+    'なぞった所が<b style="color:#8ff0c0">その場で酸性</b>になります。<br>'+
+    '腐敗のシミは、上をなぞれば溶けます。<br>ゆっくりなぞるほど濃く塗れます。</div>';
+}
+
+/* ── 入力 ── */
+function pos(e){ const t=e.touches?e.touches[0]:e; return {x:t.clientX,y:t.clientY}; }
+function down(e){
+  e.preventDefault(); ac();
+  if(over){ reset(); return; }
+  const p=pos(e); fx=px=p.x; fy=py=p.y; dragging=true; seg=null;
+  if(!started){ started=true; document.getElementById('msg').classList.add('hide'); }
+  paint(fx,fy,fx,fy);
+}
+function move(e){
+  e.preventDefault(); if(!dragging||over) return;
+  const p=pos(e); px=fx; py=fy; fx=p.x; fy=p.y;
+  paint(px,py,fx,fy); seg={ax:px,ay:py,bx:fx,by:fy};
+}
+function up(){ dragging=false; seg=null; }
+cv.addEventListener('touchstart',down,{passive:false});
+cv.addEventListener('touchmove',move,{passive:false});
+cv.addEventListener('touchend',up,{passive:false});
+cv.addEventListener('touchcancel',up,{passive:false});
+cv.addEventListener('mousedown',down);
+addEventListener('mousemove',e=>{ if(dragging) move(e); });
+addEventListener('mouseup',up);
+
+function segDist(ax,ay,bx,by,x,y){
+  const dx=bx-ax, dy=by-ay, L=dx*dx+dy*dy;
+  let t=L?((x-ax)*dx+(y-ay)*dy)/L:0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(x-(ax+dx*t), y-(ay+dy*t));
+}
+
+/* ── 塗る ── */
+function paint(ax,ay,bx,by){
+  const R=BRUSH*S, d=Math.hypot(bx-ax,by-ay);
+  const n=Math.max(1,Math.ceil(d/(R*0.30)));
+  // 重ねても飛ばないように source-over（塗るほど濃くなり、上限で止まる）
+  ac2.globalCompositeOperation='source-over';
+  for(let i=0;i<n;i++){
+    const t=n===1?0:i/(n-1);
+    const x=ax+(bx-ax)*t+rnd(-.10,.10)*R, y=ay+(by-ay)*t+rnd(-.10,.10)*R;
+    const rr=R*rnd(.86,1.12)/2;                 // 縁を不揃いにして有機的に
+    const g=ac2.createRadialGradient(x/2,y/2,0,x/2,y/2,rr);
+    g.addColorStop(0,   'rgba(86,214,166,0.20)');
+    g.addColorStop(0.55,'rgba(72,196,152,0.12)');
+    g.addColorStop(1,   'rgba(64,178,140,0)');
+    ac2.fillStyle=g; ac2.beginPath(); ac2.arc(x/2,y/2,rr,0,6.284); ac2.fill();
+  }
+  // 新しい地面を塗ったか（音と手応えのため、間引いて調べる）
+  if(clock-sampleT>0.055){
+    sampleT=clock;
+    if(acidAt(bx,by)<150){ streak++; streakT=clock; paintSnd(streak);
+      for(let i=0;i<3;i++) bits.push({x:bx+rnd(-8,8)*S,y:by+rnd(-8,8)*S,
+        vx:rnd(-40,40),vy:rnd(-40,40),t:0,life:.5,c:'#bfffe4',r:rnd(1,2.2)*S});
+    }
+  }
+  // 塗った所に乳酸菌が住み着く（酸が薄れると消える）
+  paintDist+=d;
+  while(paintDist>17*S){
+    paintDist-=17*S;
+    const a=rnd(0,6.284), o=rnd(0,.62)*R;
+    settled.push({x:bx+Math.cos(a)*o, y:by+Math.sin(a)*o, r:rnd(2.6,4.4)*S,
+                  ph:rnd(0,6.28), vx:rnd(-3,3), vy:rnd(-3,3), t:0});
+    if(settled.length>170) settled.shift();
+  }
+  // 指先に乳酸菌がまとわりつく
+  if(cocci.length<26&&Math.random()<0.55)
+    cocci.push({x:bx+rnd(-14,14)*S,y:by+rnd(-14,14)*S,a:rnd(0,6.28),
+                o:rnd(9,26)*S,w:rnd(-2.4,2.4),t:0,life:rnd(.7,1.5),rad:rnd(3.4,5.4)*S});
+}
+
+/* ── 更新 ── */
+function update(dt){
+  clock+=dt;
+  if(over) return;
+  // 酸は少しずつ薄れる
+  const f=1-Math.pow(0.5,dt/FADE);
+  if(f>0){ ac2.globalCompositeOperation='destination-out';
+    ac2.fillStyle='rgba(0,0,0,'+f+')'; ac2.fillRect(0,0,AW,AH); }
+
+  if(started){
+    // 腐敗が湧いて広がる（塗られていない所だけ）
+    if(clock>1.2 && Math.random()<dt/ROT_R){ const r=newRot(); if(r){ rots.push(r); rotSnd(); } }
+    for(const r of rots) if(r.r<r.max) r.r=Math.min(r.max, r.r+ROT_G*S*dt);
+  }
+  // 塗ると溶ける
+  if(dragging&&seg){
+    const R=BRUSH*S;
+    for(let i=rots.length-1;i>=0;i--){
+      const r=rots[i];
+      if(segDist(seg.ax,seg.ay,seg.bx,seg.by,r.x,r.y) < R+r.r*0.75){
+        r.r-=ERODE*S*dt;
+        if(r.r<5*S){
+          rots.splice(i,1); killed++; popSnd(killed);
+          for(let k=0;k<16;k++) bits.push({x:r.x,y:r.y,vx:rnd(-150,150),vy:rnd(-150,150),
+            t:0,life:.7,c:Math.random()<.5?'#8ff0c0':'#d8b08a',r:rnd(1.5,3.4)*S});
+        }
+      }
+    }
+    seg=null;
+  }
+  for(let i=bits.length-1;i>=0;i--){ const b=bits[i];
+    b.t+=dt; b.x+=b.vx*dt; b.y+=b.vy*dt; b.vx*=.93; b.vy*=.93;
+    if(b.t>b.life) bits.splice(i,1); }
+  for(let i=cocci.length-1;i>=0;i--){ const c=cocci[i];
+    c.t+=dt; c.a+=c.w*dt;
+    if(c.t>c.life) cocci.splice(i,1); }
+  // 住み着いた菌：ゆっくり漂い、酸が薄れた所からは消える
+  for(const s of settled){ s.t+=dt; s.x+=s.vx*dt; s.y+=s.vy*dt;
+    if(Math.random()<dt*1.5){ s.vx=rnd(-3,3); s.vy=rnd(-3,3); } }
+  for(let k=0;k<9&&settled.length;k++){
+    sweep=(sweep+1)%settled.length; const s=settled[sweep];
+    if(acidAt(s.x,s.y)<45) settled.splice(sweep,1);
+  }
+
+  if(clock-streakT>1.1) streak=0;
+  measure(dt);
+}
+
+/* 塗った面積と腐敗面積を測る */
+let measT=0;
+function measure(dt){
+  measT-=dt; if(measT>0) return; measT=0.25;
+  tc.clearRect(0,0,44,78); tc.drawImage(acid,0,0,44,78);
+  const d=tc.getImageData(0,0,44,78).data;
+  let n=0; for(let i=3;i<d.length;i+=4) if(d[i]>60) n++;
+  cover=n/(44*78);
+  let ra=0; for(const r of rots) ra+=Math.PI*r.r*r.r*0.72;
+  rotPct=Math.min(1, ra/(W*H));
+  document.getElementById('aFill').style.width=(cover*100).toFixed(0)+'%';
+  document.getElementById('aVal').textContent=(cover*100).toFixed(0)+'%';
+  document.getElementById('rFill').style.width=(rotPct*100).toFixed(0)+'%';
+  document.getElementById('rVal').textContent=(rotPct*100).toFixed(0)+'%';
+  if(started&&rotPct*100>=LOSE) endGame();
+}
+function endGame(){
+  over=true; dragging=false;
+  const m=document.getElementById('msg'); m.classList.remove('hide');
+  m.innerHTML='<div class="big">腐ってしまった</div><div class="small">'+
+    '溶かしたシミ <b style="color:#8ff0c0">'+killed+'</b> ／ '+
+    '守った時間 <b style="color:#8ff0c0">'+clock.toFixed(0)+'秒</b><br><br>タップでもう一度</div>';
+}
+
+/* ── 描画 ── */
+function blobK(r,a){
+  let k=1;
+  for(const l of r.lobes) k+=Math.cos(a-l.a)*l.d*0.52*l.s;
+  k+=Math.sin(a*3+clock*0.8+r.ph)*0.09 + Math.sin(a*7-r.ph*2)*0.055
+    + Math.sin(a*11+clock*0.5)*0.03;
+  return Math.max(0.42,k);
+}
+function blob(r){
+  ctx.beginPath();
+  for(let i=0;i<=40;i++){
+    const a=i/40*6.284, k=blobK(r,a);
+    const x=r.x+Math.cos(a)*r.r*k, y=r.y+Math.sin(a)*r.r*k;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.closePath();
+}
+function draw(){
+  const tint=Math.min(1,cover*1.4);
+  ctx.fillStyle='rgb('+(10+6*tint|0)+','+(13+7*tint|0)+','+(17+2*tint|0)+')';
+  ctx.fillRect(0,0,W,H);
+
+  // 酸の層（本体＋ごく薄い発光）
+  ctx.save(); ctx.imageSmoothingEnabled=true;
+  ctx.globalAlpha=0.60; ctx.drawImage(acid,0,0,W,H);
+  ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=0.15;
+  ctx.drawImage(acid,0,0,W,H);
+  ctx.restore(); ctx.globalAlpha=1;
+
+  // 住み着いた乳酸菌（塗った所が生きて見える）
+  for(const s of settled){
+    const pu=0.82+0.18*Math.sin(clock*2.2+s.ph);
+    ctx.fillStyle='rgba(196,255,228,.60)';
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r*pu,0,6.284); ctx.fill();
+    ctx.fillStyle='rgba(120,255,205,.30)';
+    ctx.beginPath(); ctx.arc(s.x-s.r*.28,s.y-s.r*.28,s.r*.45*pu,0,6.284); ctx.fill();
+  }
+
+  // 腐敗
+  for(const r of rots){
+    const g=ctx.createRadialGradient(r.x,r.y,0,r.x,r.y,r.r*1.5);
+    g.addColorStop(0,'rgba(60,40,28,.85)'); g.addColorStop(1,'rgba(40,28,22,0)');
+    ctx.fillStyle=g; blob(r); ctx.fill();
+    ctx.fillStyle='rgba(120,86,58,.55)'; blob(r); ctx.fill();
+    ctx.strokeStyle='rgba(186,140,96,.45)'; ctx.lineWidth=1.2*S; blob(r); ctx.stroke();
+    // 毛羽立った縁（カビっぽさ）
+    ctx.fillStyle='rgba(150,110,74,.30)';
+    for(let i=0;i<18;i++){
+      const a=(i/18)*6.284+r.ph*0.3, k=blobK(r,a);
+      const x=r.x+Math.cos(a)*r.r*k, y=r.y+Math.sin(a)*r.r*k;
+      const t=r.r*(0.10+0.07*Math.sin(i*2.3+r.ph+clock*0.7));
+      ctx.beginPath(); ctx.arc(x,y,Math.max(1,t),0,6.284); ctx.fill();
+    }
+    // ぷつぷつ
+    for(let i=0;i<5;i++){
+      const a=r.ph+i*1.257+clock*0.16, rr=r.r*(0.28+0.15*i);
+      ctx.fillStyle='rgba(200,158,110,.32)';
+      ctx.beginPath(); ctx.arc(r.x+Math.cos(a)*rr, r.y+Math.sin(a)*rr, r.r*0.11, 0,6.284); ctx.fill();
+    }
+  }
+
+  // 指先の乳酸菌
+  for(const c of cocci){
+    const k=1-c.t/c.life, x=c.x+Math.cos(c.a)*c.o*0.35, y=c.y+Math.sin(c.a)*c.o*0.35;
+    ctx.globalAlpha=Math.max(0,k);
+    ctx.fillStyle='#a9ffdc'; ctx.beginPath(); ctx.arc(x,y,c.rad*(0.6+0.4*k),0,6.284); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  for(const b of bits){
+    ctx.globalAlpha=Math.max(0,1-b.t/b.life); ctx.fillStyle=b.c;
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,6.284); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  if(dragging&&!over){
+    const R=BRUSH*S, pu=0.6+0.4*Math.sin(clock*7);
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    const g=ctx.createRadialGradient(fx,fy,0,fx,fy,R);
+    g.addColorStop(0,'rgba(180,255,225,'+(0.16+0.07*pu)+')');
+    g.addColorStop(1,'rgba(140,240,200,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(fx,fy,R,0,6.284); ctx.fill(); ctx.restore();
+  }
+
+  if(streak>2&&!over){
+    ctx.fillStyle='rgba(143,240,192,.8)'; ctx.textAlign='center';
+    ctx.font='800 '+(19*S)+'px system-ui';
+    ctx.fillText(streak+' 連続', W/2, H-30*S);
+  }
+}
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(.05,(now-last)/1000); last=now;
+  update(dt); draw(); requestAnimationFrame(loop);
+}
+reset(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>
