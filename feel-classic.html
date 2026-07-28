@@ -37,7 +37,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v23 (07-28 10:34)';
+const BUILD='v24 (07-28 10:50)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
@@ -183,11 +183,15 @@ function followCam(dt){
     cx+=fingerVel.x*g; cy+=fingerVel.y*g;
   }
   // 中央からの距離（-1〜1）に比例して流す。中央を少し過ぎた所から効き始める
+  // ★中央付近でも速度が乗るよう、立ち上がりを強くする（t^0.7）。
+  //   直線だと中央から93px押し出さないと毎秒600pxが出ず、走り出しの間ずっと
+  //   指が端寄りになる＝指先より先の余白が狭い＝「先が見えない」。
+  //   少し押しただけで速度が乗れば、指を中央近くに保ったまま走れる。
   const shape=v=>{
     const a=Math.abs(v);
     if(a<CAM_DEAD) return 0;
     const t=Math.min(1,(a-CAM_DEAD)/(1-CAM_DEAD));
-    return (v<0?-1:1)*t;
+    return (v<0?-1:1)*Math.pow(t,0.7);
   };
   cx+=shape((finger.x-W/2)/(W/2))*PAN_MAX;
   cy+=shape((finger.y-H/2)/(H/2))*PAN_MAX;
