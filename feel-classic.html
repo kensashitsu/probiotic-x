@@ -81,7 +81,33 @@ const FOES_REF=+(new URLSearchParams(location.search).get('foes')||10);
 // 盤面の上下端はここで一元管理する（HUDとボタンを避ける分だけ空ける）
 const PLAY_TOP=110;
 function playBot(){ return H-120; }
-function playArea(){ return W*Math.max(120, playBot()-PLAY_TOP); }
+// ★盤面を画面より広くして、鎖の先頭をカメラが追う。
+//   PC版の「広い画面で走り回れる」自由度は、画面内の縮尺だけでは戻らない
+const WORLD=Math.max(1, Math.min(4, +(_q.get('world')||2)));
+function worldW(){ return W*WORLD; }
+function worldBot(){ return PLAY_TOP + (playBot()-PLAY_TOP)*WORLD; }
+function playArea(){ return worldW()*Math.max(120, worldBot()-PLAY_TOP); }
+let cam={x:0,y:0};
+function camMaxX(){ return Math.max(0, worldW()-W); }
+function camMaxY(){ return Math.max(0, worldBot()+120-H); }
+function clampCam(){
+  cam.x=Math.max(0,Math.min(camMaxX(),cam.x));
+  cam.y=Math.max(0,Math.min(camMaxY(),cam.y));
+}
+// 先頭が中央の枠から出たらカメラが動く（常時追従だと酔う）
+function followCam(dt){
+  if(!dragging) return;
+  const mx=W*0.30, my=H*0.28;
+  const sx=head.x-cam.x, sy=head.y-cam.y;
+  let tx=cam.x, ty=cam.y;
+  if(sx<mx) tx=head.x-mx; else if(sx>W-mx) tx=head.x-(W-mx);
+  if(sy<my) ty=head.y-my; else if(sy>H-my) ty=head.y-(H-my);
+  const k=Math.min(1,dt*7);
+  cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k;
+  clampCam();
+}
+function inView(x,y,m){ m=m||60;
+  return x>cam.x-m && x<cam.x+W+m && y>cam.y-m && y<cam.y+H+m; }
 function rodCount(){ return Math.max(20, Math.round(RODS_REF*playArea()/REF_AREA)); }
 function foeCount(){ return Math.max(5,  Math.round(FOES_REF*playArea()/REF_AREA)); }
 const DOOM=4.5;               // 弾け飛んだ菌の餓死までの秒数
@@ -114,16 +140,17 @@ function scatter(){
   rods=[];
   const N=rodCount();
   for(let i=0;i<N;i++){
-    rods.push({x:rnd(40,W-40), y:rnd(PLAY_TOP,playBot()), ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28, vx:0,vy:0,vr:0, doom:0, spent:0, dead:false});
+    rods.push({x:rnd(40,worldW()-40), y:rnd(PLAY_TOP,worldBot()), ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28, vx:0,vy:0,vr:0, doom:0, spent:0, dead:false});
   }
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
+  cam={x:0,y:0}; clampCam();
   updateHud();
 }
 function spawnFoe(){
   const spikes=[]; const n=9;
   for(let i=0;i<n;i++) spikes.push(0.75+Math.random()*0.5);
-  foes.push({x:rnd(50,W-50), y:rnd(PLAY_TOP+12,playBot()-12), r:FOE_R*rnd(0.8,1.25), ang:Math.random()*Math.PI*2,
+  foes.push({x:rnd(50,worldW()-50), y:rnd(PLAY_TOP+12,worldBot()-12), r:FOE_R*rnd(0.8,1.25), ang:Math.random()*Math.PI*2,
              phase:Math.random()*6.28, spin:rnd(-0.5,0.5), dead:false, dt:0, spikes});
 }
 
@@ -131,7 +158,9 @@ function spawnFoe(){
 let dragging=false, path=[], orderSeq=0, joinedCount=0, head={x:0,y:0}, prevHead={x:0,y:0};
 let sealCooldown=0;
 let clock=0;   // 経過秒。軌跡の各点の生成時刻に使う
-function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+// 画面座標 → 世界座標（カメラ分を足す）
+function pos(e){const r=cv.getBoundingClientRect();
+  return{x:e.clientX-r.left+cam.x, y:e.clientY-r.top+cam.y};}
 
 // ※オフセット操作（操作点を指より上に置く）は試したが却下。
 //   ユーザー評「違和感があり、手が邪魔になっていた修正前よりミスが多発する」。
@@ -542,6 +571,8 @@ function loop(ts){
   if(hitCd>0) hitCd-=dt;
   if(dragging){ trimTrail(); checkHit(); }
 
+  followCam(dt);
+
   g.save();
   if(shake>0.2){ const s=shake; g.translate(rnd(-s,s),rnd(-s,s)); shake*=0.86; } else shake=0;
 
@@ -549,15 +580,16 @@ function loop(ts){
   const bg=g.createRadialGradient(W/2,H*0.45,60,W/2,H*0.45,Math.max(W,H)*0.8);
   bg.addColorStop(0,'#12202a'); bg.addColorStop(1,'#0b0f14'); g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
 
+  g.translate(-cam.x,-cam.y);   // ここから世界座標
+  // 世界の縁（どこまで行けるか分かるように薄く）
+  g.strokeStyle='rgba(120,200,180,.10)'; g.lineWidth=2;
+  g.strokeRect(0,PLAY_TOP,worldW(),worldBot()-PLAY_TOP);
+
   // 腐敗菌
   for(const f of foes){ f.phase+=dt*(1+f.spin); if(f.dead) f.dt+=dt;
+    if(!inView(f.x,f.y)) continue;
     if(f.resist>0){ f.resist-=dt*1.4; if(f.resist<0) f.resist=0; }
-    // 操作中の指に近い腐敗菌ほど強く警告する（手の下に隠れている想定）
-    let warn=0;
-    if(dragging && !f.dead){
-      const d=Math.hypot(f.x-head.x, f.y-head.y);
-      warn=warnLevel(d);
-    }
+    const warn=0;   // 近づくと出ていた赤い輪は邪魔なので廃止
     drawFoe(f,warn); }
   foes=foes.filter(f=>!(f.dead&&f.dt>0.5));
 
@@ -621,10 +653,11 @@ function loop(ts){
 
   // 浮遊中の味方
   for(const r of rods){ if(r.joined) continue;
+    if(!inView(r.x,r.y) && !(r.vx||r.vy) && !(r.doom>0)) continue;
     // 弾け飛んだ勢い（あれば）を減衰させながら適用
     if(r.vx||r.vy){ r.x+=r.vx; r.y+=r.vy; r.ang+=r.vr; r.vx*=0.93; r.vy*=0.93; r.vr*=0.93;
-      if(r.x<24){r.x=24;r.vx*=-0.5;} if(r.x>W-24){r.x=W-24;r.vx*=-0.5;}
-      if(r.y<PLAY_TOP-20){r.y=PLAY_TOP-20;r.vy*=-0.5;} if(r.y>playBot()+20){r.y=playBot()+20;r.vy*=-0.5;}
+      if(r.x<24){r.x=24;r.vx*=-0.5;} if(r.x>worldW()-24){r.x=worldW()-24;r.vx*=-0.5;}
+      if(r.y<PLAY_TOP-20){r.y=PLAY_TOP-20;r.vy*=-0.5;} if(r.y>worldBot()+20){r.y=worldBot()+20;r.vy*=-0.5;}
       if(Math.abs(r.vx)<0.05&&Math.abs(r.vy)<0.05){r.vx=0;r.vy=0;r.vr=0;} }
     r.phase+=dt*1.5; const wob=Math.sin(r.phase)*0.06;
     // ★消耗中（酸を出し切った）＝くすんで拾えない。回復したら元に戻る
@@ -677,17 +710,6 @@ function loop(ts){
     drawRod(r.x,r.y,r.ang,true);
   }
 
-  // 指先。近くに腐敗菌が居る時は指の上側にも見える警告の輪を重ねる
-  if(dragging){
-    let near=0;
-    for(const f of foes){ if(f.dead) continue;
-      const d=Math.hypot(f.x-head.x,f.y-head.y);
-      near=Math.max(near, warnLevel(d)); }
-    if(near>0){
-      g.beginPath(); g.arc(head.x,head.y,30+10*near,0,7);
-      g.strokeStyle='rgba(255,150,110,'+(0.35+0.55*near)+')'; g.lineWidth=3; g.stroke();
-    }
-  }
   if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
     g.fillStyle='rgba(200,255,230,.9)'; g.shadowColor='#8ff0c0'; g.shadowBlur=16; g.fill(); g.shadowBlur=0;
     // ★今の鎖本数＝一度に溶かせる匹数。閉じる前に足りるか判断させる
@@ -695,8 +717,8 @@ function loop(ts){
     // ★指は物理的に8〜10mm＝55〜64px を覆う。30pxでは指の下に隠れるので離す。
     //   画面上端に近い時は指の下側に回す
     const br=17;
-    const bx=Math.max(br+4, Math.min(W-br-4, head.x));
-    const by=(head.y-56 < br+50)? head.y+56 : head.y-56;
+    const bx=Math.max(cam.x+br+4, Math.min(cam.x+W-br-4, head.x));
+    const by=(head.y-56 < cam.y+br+50)? head.y+56 : head.y-56;
     g.save();
     g.beginPath(); g.arc(bx,by,br,0,7);
     g.fillStyle='rgba(6,14,12,.82)'; g.fill();
@@ -708,13 +730,38 @@ function loop(ts){
     g.restore(); g.shadowBlur=0;
   }
 
-  g.restore(); // 画面揺れ
+  g.restore(); // 世界座標ここまで＋画面揺れ
+
+  // ミニマップ：広い世界のどこに何が居るかを把握するための最小限の表示
+  if(WORLD>1 && _q.get('map')!=='0'){
+    const mw=58, mh=Math.round(mw*(worldBot()-PLAY_TOP)/worldW()), mx=10, my=100;
+    g.save();
+    g.fillStyle='rgba(10,16,20,.55)'; g.strokeStyle='rgba(140,240,200,.22)'; g.lineWidth=1;
+    g.beginPath(); g.rect(mx,my,mw,mh); g.fill(); g.stroke();
+    const sx=mw/worldW(), sy=mh/(worldBot()-PLAY_TOP);
+    for(const f of foes){ if(f.dead) continue;
+      g.beginPath(); g.arc(mx+f.x*sx, my+(f.y-PLAY_TOP)*sy, 1.6, 0, 7);
+      g.fillStyle='rgba(226,138,178,.9)'; g.fill(); }
+    // 今なぞっている線
+    if(dragging && path.length>1){
+      g.beginPath(); g.moveTo(mx+path[0].x*sx, my+(path[0].y-PLAY_TOP)*sy);
+      for(let i=1;i<path.length;i++) g.lineTo(mx+path[i].x*sx, my+(path[i].y-PLAY_TOP)*sy);
+      g.strokeStyle='rgba(160,255,215,.85)'; g.lineWidth=1.2; g.stroke();
+      g.beginPath(); g.arc(mx+head.x*sx, my+(head.y-PLAY_TOP)*sy, 2.2, 0, 7);
+      g.fillStyle='#c8ffe6'; g.fill();
+    }
+    // 今見えている範囲
+    g.strokeStyle='rgba(200,255,230,.4)'; g.lineWidth=1;
+    g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, W*sx, Math.min(mh, H*sy));
+    g.restore();
+  }
   prevHead.x=head.x; prevHead.y=head.y;
   requestAnimationFrame(loop);
 }
 resize(); scatter(); requestAnimationFrame(loop);
 window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals,path:()=>path,hitMode:()=>HIT_MODE,
-  head:()=>head, bounds:()=>({top:PLAY_TOP,bot:playBot()})};
+  head:()=>head, cam:()=>cam, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
+  bounds:()=>({top:PLAY_TOP,bot:playBot()})};
 </script>
 </body>
 </html>
