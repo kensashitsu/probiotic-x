@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v40 (07-29 08:31)';
+const BUILD='v41 (07-29 08:42)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -130,6 +130,18 @@ const PULL_V=+(_q.get('pull')||150);          // 引き寄せの最大速度(px/
 // ★実際の大きさに合わせる。乳酸桿菌は約1×3.5µm、ブドウ球菌は直径約0.8〜1.0µm。
 //   つまり「球菌の直径 ≒ 桿菌の太さ」が正しい。以前は桿菌の太さの2〜3倍（ほぼ桿菌の長さ）
 //   もあって、実物よりかなり大きかった。?foer=1.6 のように倍率で見比べられる
+const CHAIN_MAX=+(_q.get('chain')||7);   // 連鎖の最大の長さ
+// ★疾走すると酸のオーラを纏う。触れた連鎖は弾け飛び、球菌は近くの仲間と繋がり直そうとする。
+//   間に合わなければ死滅＝数が減る。走る＝安全だが囲めない／囲む＝減速して危険、という
+//   緊張が生まれる。オーラの大きさは繋いだ数で決まる＝ここでも繋ぐ意味が出る
+const AURA_LO=+(_q.get('auralo')||520);   // これ以上の速さでオーラが出始める(px/秒)
+const AURA_HI=+(_q.get('aurahi')||980);   // ここで最大
+const AURA_R0=+(_q.get('aura0')||26);     // オーラの基準半径
+const AURA_PER=+(_q.get('aurap')||1.5);   // 桿菌1匹あたり広がる分
+const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
+const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
+let aura=0, headSpd=0, sosKilled=0, burstSeen=false;
+function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
 const FOE_R=RW*FOE_K/2;                       // 腐敗菌の半径
 
@@ -243,7 +255,7 @@ function followCam(dt){
   if(dragging && (clock-strokeT0<0.13 || dirRef.ang==null)){
     prevFinger.x=finger.x; prevFinger.y=finger.y; return;
   }
-  if(!dragging){ fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
+  if(!dragging){ aura=0; headSpd=0; fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
     camVel.x=0; camVel.y=0;
     prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
   const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
@@ -406,7 +418,7 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; lunges=[]; gauge=0.5; phase='play'; playT=0;
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; lunges=[]; aura=0; headSpd=0; sosKilled=0; burstSeen=false; gauge=0.5; phase='play'; playT=0;
   foeAcc=0; allyAcc=0; loupeA=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -644,6 +656,45 @@ function checkHit(){
         if(foeDist(r.x,r.y,f) < HIT){ shatter(f.x,f.y); return; } } }
   }
 }
+// 酸のオーラが連鎖に触れたら、その連鎖を丸ごと弾き飛ばす
+function auraBurst(){
+  const R=auraR()*(0.6+0.4*aura);
+  for(const f of foes){
+    if(f.dead||f.sos!=null) continue;
+    if(!(f.link&&!f.link.dead) && !(f.next&&!f.next.dead)) continue;   // 単体は弾けない
+    if(!sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,R)) continue;
+    // その連鎖を全部たどって切り離す
+    const list=[]; let cur=f;
+    while(cur&&!cur.dead){ list.push(cur); cur=cur.link&&!cur.link.dead? cur.link:null; }
+    cur=f.next;
+    while(cur&&!cur.dead){ list.push(cur); cur=cur.next&&!cur.next.dead? cur.next:null; }
+    if(list.length<2) continue;
+    for(const c of list){
+      c.link=null; c.next=null; c.clen=0; c.sos=SOS_T;
+      const a=Math.atan2(c.y-head.y, c.x-head.x)+rnd(-0.6,0.6);
+      const sp=rnd(320,620);              // 遠くまで弾き飛ばす（近くだとすぐ繋がり直せる）
+      c.vx=Math.cos(a)*sp; c.vy=Math.sin(a)*sp;
+    }
+    shards.push({x:f.x,y:f.y,life:1,good:true});   // こちらの攻撃＝ミント色
+    shake=Math.max(shake,3+Math.min(list.length,8));
+    burstSnd(list.length);
+    if(!burstSeen){ burstSeen=true; tipMsg('連鎖を弾いた！ 球菌は繋がり直せなければ死滅する'); }
+    return;
+  }
+}
+function burstSnd(n){ if(!A)return; try{
+  const t=A.currentTime, dur=0.24;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate);
+  const ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const bp=A.createBiquadFilter(); bp.type='bandpass';
+  bp.frequency.setValueAtTime(900,t); bp.frequency.exponentialRampToValueAtTime(2400,t+dur); bp.Q.value=1.1;
+  const gg=A.createGain(); gg.gain.setValueAtTime(0.0001,t);
+  gg.gain.exponentialRampToValueAtTime(0.08+Math.min(n,8)*0.012,t+0.01);
+  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+}catch(e){} }
 function shatter(ox,oy){
   const joined=rods.filter(r=>r.joined);
   if(joined.length===0){ // 空の鎖でも軽い弾き
@@ -851,6 +902,12 @@ const FOE_RD=1.0;                     // 描く半径＝f.r のこの倍（当�
 function drawFoeCocci(f,warn){
   if(f.lunge>0) f.lunge=Math.max(0,f.lunge-0.045);
   const k=(f.dead? Math.max(0,1-f.dt*3):1)*(1+(f.lunge||0)*0.35);
+  // 繋がり直せないと死ぬ状態＝点滅で知らせる（残り少ないほど速い）
+  let sosA=1;
+  if(f.sos!=null){ const fr=Math.max(0,f.sos/SOS_T);
+    f.blink=(f.blink||0)+0.016*(6+(1-fr)*46);
+    sosA=0.32+0.68*(0.5+0.5*Math.sin(f.blink)); }
+  g.globalAlpha=sosA;
   if(k>0){
     const rs=f.resist||0;
     g.save(); g.translate(f.x,f.y); g.rotate((f.ang||0)+f.phase*0.12); g.globalAlpha=k;
@@ -882,15 +939,9 @@ function drawFoeCocci(f,warn){
       g.lineWidth=Math.max(1,R*0.30*w); g.lineCap='round';
       g.beginPath(); g.moveTo(-R*0.82,0); g.lineTo(R*0.82,0); g.stroke(); g.restore();
     }
-    g.restore(); g.globalAlpha=1;
-  }
-  if(warn>0 && !f.dead){
-    const pulse=0.72+0.28*Math.sin(clock*9);
-    g.save(); g.translate(f.x,f.y);
-    g.beginPath(); g.arc(0,0,f.r+20+48*warn,0,7);
-    g.strokeStyle='rgba(255,150,110,'+(0.95*warn*pulse)+')'; g.lineWidth=2.5+3*warn; g.stroke();
     g.restore();
   }
+  g.globalAlpha=1;
 }
 // 敵＝桿菌の形は1箇所で決める（描画と当たり判定がずれないように）。
 // 縦横比は約2.9:1＝実際の桿菌らしい細さ。太いと棒に見えず、脇を抜ける余地も消える
@@ -989,7 +1040,13 @@ function loop(ts){
     //   引き直す。これが無いと先頭だけ世界に取り残されて画面外へ消える
     moveTo(Math.max(6, Math.min(worldW()-6, finger.x/zoom+cam.x)),
            Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y/zoom+cam.y)));
-    trimTrail(); checkHit();
+    trimTrail();
+    // 頭の速さ→オーラ
+    const hs=Math.hypot(head.x-prevHead.x, head.y-prevHead.y)/Math.max(0.001,dt);
+    headSpd += (hs-headSpd)*Math.min(1,dt*10);
+    const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)));
+    aura += (want-aura)*Math.min(1,dt*(want>aura?12:6));
+    if(aura>0.35 && joinedCount>0) auraBurst(); else checkHit();
   }
 
 
@@ -1013,11 +1070,20 @@ function loop(ts){
       f.div+=dt/DIV_T;
       if(f.div>=1){
         f.div=0;
-        const a=(f.ang||0)+f.phase*0.12+Math.PI/2, d=f.r*0.65;
+        // 鎖はまっすぐ伸びる：繋がっている側の反対へ娘を出す
+        let a=(f.ang||0)+f.phase*0.12+Math.PI/2;
+        if(f.link && !f.link.dead) a=Math.atan2(f.y-f.link.y, f.x-f.link.x);
+        const d=f.r*0.65;
         spawnFoe(); const nf=foes[foes.length-1];
         nf.x=Math.max(f.r+8, Math.min(worldW()-f.r-8, f.x+Math.cos(a)*d));
         nf.y=Math.max(PLAY_TOP+f.r+8, Math.min(worldBot()-f.r-8, f.y+Math.sin(a)*d));
         nf.r=f.r*rnd(.92,1.02); nf.born=clock; nf.ang=f.ang; nf.wa=f.wa+rnd(-1,1);
+        // ★連鎖球菌（腸球菌）：分裂面が一方向なので、娘細胞は離れずに繋がって数珠になる。
+        //   一定の長さで切れる（実際の鎖も無限には伸びない）
+        // 分裂面が一方向なので、1つの菌に繋がる娘は1つだけ＝枝分かれせず一直線に伸びる
+        if(FOE_SHAPE==='cocci' && (f.clen||0)<CHAIN_MAX && !(f.next&&!f.next.dead&&!f.next.gone)){
+          nf.link=f; f.next=nf; nf.clen=(f.clen||0)+1;
+        }else{ nf.link=null; nf.next=null; nf.clen=0; }
         f.x-=Math.cos(a)*d; f.y-=Math.sin(a)*d;
         for(let k=0;k<STEAL_N;k++) killAllyNear(nf.x,nf.y,STEAL_R);   // 居場所と栄養を奪う
       }
@@ -1098,6 +1164,38 @@ function loop(ts){
     }
     for(const f of foes){
       if(f.dead) continue;
+      if(f.link && (f.link.dead||f.link.gone)) f.link=null;
+      // ★弾け飛んだ球菌：仲間に繋がれば助かる、間に合わなければ死滅
+      if(f.sos!=null){
+        f.sos-=dt;
+        // 飛んだ勢い
+        if(f.vx||f.vy){ f.x+=f.vx*dt; f.y+=f.vy*dt;
+          const dmp=Math.pow(0.06,dt); f.vx*=dmp; f.vy*=dmp;
+          const m2=f.r+6;
+          if(f.x<m2){f.x=m2;f.vx*=-0.5;} else if(f.x>worldW()-m2){f.x=worldW()-m2;f.vx*=-0.5;}
+          if(f.y<PLAY_TOP+m2){f.y=PLAY_TOP+m2;f.vy*=-0.5;} else if(f.y>worldBot()-m2){f.y=worldBot()-m2;f.vy*=-0.5;}
+          if(Math.abs(f.vx)<3&&Math.abs(f.vy)<3){ f.vx=0; f.vy=0; } }
+        // 近くの仲間へ寄っていく（相手は連鎖の端＝まだ娘がいない個体）
+        let tg=null, td=1e9;
+        for(const o of foes){
+          if(o===f||o.dead||o.sos!=null) continue;
+          if(o.next&&!o.next.dead) continue;
+          const d=Math.hypot(o.x-f.x,o.y-f.y); if(d<td){ td=d; tg=o; }
+        }
+        if(tg){
+          const a=Math.atan2(tg.y-f.y,tg.x-f.x);
+          f.x+=Math.cos(a)*SOS_V*dt; f.y+=Math.sin(a)*SOS_V*dt;
+          if(td < (f.r+tg.r)*1.25){                      // 繋がれた＝生き延びる
+            f.link=tg; tg.next=f; f.clen=(tg.clen||0)+1; f.sos=null; f.vx=0; f.vy=0;
+            for(let i=0;i<5;i++) bits.push({x:f.x,y:f.y,vx:rnd(-1,1),vy:rnd(-1,1),life:.7,r:rnd(1,2)});
+          }
+        }
+        if(f.sos!=null && f.sos<=0){                     // 死滅
+          f.dead=true; f.dt=0; f.sos=null; sosKilled++;
+          for(let i=0;i<10;i++) bits.push({x:f.x,y:f.y, vx:rnd(-1.2,1.2),vy:rnd(-1.5,0.4), life:1, r:rnd(1.4,3.2)});
+        }
+        continue;                                        // 通常の漂いはしない
+      }
       f.wa+=Math.sin(clock*0.27+f.phase)*dt*0.8;
       const sp=FOE_DRIFT*f.ws;
       f.x+=Math.cos(f.wa)*sp*dt; f.y+=Math.sin(f.wa)*sp*dt;
@@ -1105,6 +1203,20 @@ function loop(ts){
       if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
       if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
     }
+    // 連鎖を保つ（隣同士が離れないように引き合う）。2回ゆるめると鎖がしなやかに揺れる
+    for(let pass=0;pass<2;pass++){
+      for(const f of foes){
+        if(f.dead||!f.link||f.link.dead) continue;
+        const o=f.link;
+        const dx=o.x-f.x, dy=o.y-f.y, d=Math.hypot(dx,dy)||0.0001;
+        const target=(f.r+o.r)*0.90;                 // 少し重なる＝隔壁でつながって見える
+        const k=((d-target)/d)*0.5*0.55;
+        f.x+=dx*k; f.y+=dy*k; o.x-=dx*k; o.y-=dy*k;
+      }
+    }
+    for(const f of foes){ if(f.dead) continue;
+      const m=f.r+6;
+      f.x=Math.max(m,Math.min(wx-m,f.x)); f.y=Math.max(PLAY_TOP+m,Math.min(yb-m,f.y)); }
   }
 
   g.save();
@@ -1153,13 +1265,26 @@ function loop(ts){
     } }
   lunges=lunges.filter(L=>L.life>0);
 
+  // 連鎖球菌のつながり（首）。球の下に敷いて、融合して見えるようにする
+  if(FOE_SHAPE==='cocci'){
+    for(const f of foes){
+      if(f.dead||!f.link||f.link.dead) continue;
+      if(!inView(f.x,f.y,40)) continue;
+      g.beginPath(); g.moveTo(f.x,f.y); g.lineTo(f.link.x,f.link.y);
+      g.strokeStyle='rgba(168,80,118,.95)'; g.lineWidth=Math.min(f.r,f.link.r)*1.55;
+      g.lineCap='round'; g.stroke();
+    }
+  }
   // 腐敗菌
   for(const f of foes){ f.phase+=dt*(1+f.spin); if(f.dead) f.dt+=dt;
     if(!inView(f.x,f.y)) continue;
     if(f.resist>0){ f.resist-=dt*1.4; if(f.resist<0) f.resist=0; }
     const warn=0;   // 近づくと出ていた赤い輪は邪魔なので廃止
     drawFoe(f,warn); }
-  foes=foes.filter(f=>!(f.dead&&f.dt>0.5));
+  for(const f of foes) if(f.dead&&f.dt>0.5) f.gone=true;
+  foes=foes.filter(f=>!f.gone);
+  for(const f of foes){ if(f.link&&(f.link.gone||f.link.dead)) f.link=null;
+                        if(f.next&&(f.next.gone||f.next.dead)) f.next=null; }
 
   // 封印フラッシュ
   for(const s of seals){
@@ -1216,7 +1341,8 @@ function loop(ts){
   // シャッターの破片フラッシュ（弾けた地点の輪）
   for(const s of shards){ s.life-=dt*2.6;
     if(s.life>0){ g.beginPath(); g.arc(s.x,s.y,(1-s.life)*70+8,0,7);
-      g.strokeStyle='rgba(255,150,120,'+(0.6*s.life)+')'; g.lineWidth=3+6*s.life; g.stroke(); } }
+      g.strokeStyle= s.good? 'rgba(150,255,205,'+(0.65*s.life)+')' : 'rgba(255,150,120,'+(0.6*s.life)+')';
+      g.lineWidth=3+6*s.life; g.stroke(); } }
   shards=shards.filter(s=>s.life>0);
 
   // 浮遊中の味方
@@ -1290,6 +1416,19 @@ function loop(ts){
     drawRod(r.x,r.y,r.ang,true);
   }
 
+  // ★疾走中の酸のオーラ
+  if(dragging && aura>0.03){
+    const R=auraR()*(0.6+0.4*aura), pu=0.86+0.14*Math.sin(clock*14);
+    g.save(); g.globalCompositeOperation='lighter';
+    const ag=g.createRadialGradient(head.x,head.y,R*0.15,head.x,head.y,R*pu);
+    ag.addColorStop(0,'rgba(170,255,220,'+(0.34*aura)+')');
+    ag.addColorStop(0.55,'rgba(120,240,190,'+(0.16*aura)+')');
+    ag.addColorStop(1,'rgba(110,230,180,0)');
+    g.fillStyle=ag; g.beginPath(); g.arc(head.x,head.y,R*pu,0,7); g.fill();
+    g.strokeStyle='rgba(190,255,230,'+(0.30*aura)+')'; g.lineWidth=1.6;
+    g.beginPath(); g.arc(head.x,head.y,R*0.92*pu,0,7); g.stroke();
+    g.restore();
+  }
   if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
     g.fillStyle='rgba(200,255,230,.9)'; g.shadowColor='#8ff0c0'; g.shadowBlur=16; g.fill(); g.shadowBlur=0;
     // ★今の鎖本数＝一度に溶かせる匹数。閉じる前に足りるか判断させる
