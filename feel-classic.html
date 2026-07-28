@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v36 (07-28 17:34)';
+const BUILD='v37 (07-29 06:56)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -126,7 +126,13 @@ const FOE_R=13*SCALE;                // 腐敗菌の半径
 
 // ★盤面の密度は画面サイズに依らず一定にする。
 //   固定数だとSE3(375x667)は390x844比で湧き範囲の面積が68%＝密度が26%上がり渋滞する
-const REF_AREA=390*604, RODS_REF=64;
+const REF_AREA=390*604;
+// ★味方と敵は同数で始める（100匹対100匹）。ゲージ＝そのまま頭数の比なので、
+//   1匹倒すごとに約1%動くのが目で見える。数の生き残り勝負として一番分かりやすい。
+//   画面が変わっても密度が保たれるよう面積比で決める（?n=100 で絶対数を指定できる）
+const N_ABS=+(_q.get('n')||0);
+const N_REF=+(_q.get('nref')||16);
+const CAP_K=+(_q.get('cap')||9.0);   // 食品に入りきる総数＝開始数の何倍か
 // 敵の密度。狭い画面で通り道が無くなるのが避けられなさの主因なので既定を下げる
 const FOES_REF=+(new URLSearchParams(location.search).get('foes')||10);
 
@@ -284,8 +290,10 @@ function followCam(dt){
 }
 function inView(x,y,m){ m=m||60;
   return x>cam.x-m && x<cam.x+viewW()+m && y>cam.y-m && y<cam.y+viewH()+m; }
-function rodCount(){ return Math.max(20, Math.round(RODS_REF*playArea()/REF_AREA)); }
-function foeCount(){ return Math.max(5,  Math.round(FOES_REF*playArea()/REF_AREA)); }
+function startCount(){ return N_ABS>0? N_ABS : Math.max(12, Math.round(N_REF*playArea()/REF_AREA)); }
+function capCount(){ return Math.round(startCount()*CAP_K); }
+function rodCount(){ return startCount(); }
+function foeCount(){ return startCount(); }
 const DOOM=4.5;               // 弾け飛んだ菌の餓死までの秒数
 const DOOM_WARN=1.8;          // 残りこの秒数で点滅予告
 // ★酸を出した桿菌は消耗する（自家中毒）。封じた匹数だけ鎖から抜けて使用不能になり、
@@ -317,41 +325,43 @@ let loupeA=0;                            // ルーペの表示量（滑らかに
 //    ゲージが構造的に進まないので廃止した。
 // ============================================================
 // ★数値は机上シミュレーションで決めた（撃破速度ごとの決着時間を目標に探索）。
-//   90秒後の乳酸%：放置23／15匹分32／30匹分43／45匹分61／60匹分91／80匹分で完封。
-//   ※最初の設定は緩すぎて94%の圧勝になったので、腐敗の増殖を2.7倍に上げ、
-//     ゲージの効き(GAUGE_P)を鈍らせて、押し込むのに実力が要るようにした
-const FOE_GROW =+(_q.get('fgrow')||0.80);   // 腐敗菌の分裂の速さ（匹/秒の基準値）
-const FOE_CAP_K=+(_q.get('fcap')||2.4);     // 腐敗菌の上限＝初期数の何倍か
-const ALLY_GROW=+(_q.get('agrow')||2.0);    // 乳酸菌の分裂の速さ（酸が優勢な時ほど速い）
-const ALLY_LOSS=+(_q.get('aloss')||0.16);   // 腐敗に押されて乳酸菌が減る速さ
-const GAUGE_P  =+(_q.get('gp')||1.2);         // ゲージの効き。大きいほど数の差が大きく振れる
-const GAUGE_SPD=+(_q.get('gspd')||0.16);    // ゲージが動く最大速度（割合/秒）
-// ★ナワバリバトル方式：制限時間内にゲージをどれだけ自分側へ押し込めたかで勝敗。
-//   途中で完全に押し切ったらノックアウト（完封）で即終了。
-//   これが無いと拮抗したまま延々終わらない（実測：自動プレイで240秒決着せず）
+//   90秒後の乳酸%：放置17／15匹分25／30匹分36／45匹分54／60匹分87／80匹分で完封。
+//   ★重要な作り直し：以前は「乳酸菌が毎秒35匹死んで同数生まれる」空回りをしていて
+//     （10秒で総数の87%が入れ替わるのに総数はほぼ不変）、ゲージが実質"敵の数"だけで
+//     決まっていた。連続的な減衰を廃止し、"腐敗菌が分裂する時に近くの乳酸菌を8匹奪う"
+//     だけにして、再生をゆっくり(0.11)にした。これで味方の総数も実際に動く
+//     （放置なら401→243匹まで減る）＝ゲージが両側から決まる
+// ★数値は机上シミュレーションで決定（90秒後の乳酸%が腕前に対応するよう探索）。
+//   放置23／15匹分40／30匹分56／45匹分69／60匹分80／80匹分90。
+//   ★同数(100対100)にしたら味方の密度が1画面68匹→17匹に落ち、
+//     一筆で繋がるのが16匹→2匹になって「吸い付いて鎖が伸びる」核が壊れた。
+//     そこで乳酸菌の分裂を強くして、押し込むほど味方が濃くなるようにした
+//     （上手いプレイで17→56匹/画面、放置だと敵が17→40匹/画面に増えて腐っていく）。
+//   モデルは「食品という限られた場所の取り合い」＝ロジスティック競争。
+//   合計が容量に近づくと両方とも増えにくくなる（実際の発酵と同じ基質の奪い合い）
+const GF=+(_q.get('gf')||0.016);   // 腐敗菌1匹あたりの分裂速度（/秒）
+const GA=+(_q.get('ga')||0.055);   // 乳酸菌1匹あたりの分裂速度（/秒）
+const STEAL_N=+(_q.get('steal')||1);   // 腐敗菌1回の分裂で奪う乳酸菌の数
+const STEAL_R=150;
+const DIV_T=+(_q.get('divt')||0.85);   // 二分裂にかかる時間(秒)
+const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
+const WIN_AT=0.94, LOSE_AT=0.06;
 const TIME_LIMIT=+(_q.get('time')||90);
-const WIN_AT=0.94, LOSE_AT=0.06;            // 途中で押し切ったら完封
-// ★敵の攻撃＝アンモニアの靄。腐敗菌はタンパク質を分解してアンモニアを出し、pHを上げる（実際の現象）。
-//   靄の中では ①乳酸菌を拾えない ②囲んでも溶けない（酸が中和される）③ゲージが腐敗側へ押し戻る。
-//   触れても死なない＝理不尽な即死を作らず、「近寄れない場所」で盤面に圧力をかける方式にした
+// ★pHが増殖率に効く。酸性なほど腐敗菌は増えられず乳酸菌は増えやすい（実際の発酵）
+function foeSuppress(){ return 0.6+0.8*(1-gauge); }
+function allyBoost(){ return gauge; }
+function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n; }
+function livingFoes(){ let n=0; for(const f of foes) if(!f.dead) n++; return n; }
 const AM_RATE=+(_q.get('am')||0.35);   // 靄の発生（個/秒・腐敗菌が多いほど増える）
 const AM_LIFE=+(_q.get('amlife')||9);  // 靄の寿命(秒)
 const AM_R   =72*SCALE;                // 靄の半径
-const AM_PUSH=0.012;                   // 靄1つあたりゲージを押し戻す量
-let ammo=[], amAcc=0, amSeen=false;
+let ammo=[], amAcc=0, amSeen=false, divSeen=false;
 function inAmmonia(x,y){
   for(const a of ammo){ if(a.t<a.life && Math.hypot(x-a.x,y-a.y)<a.r) return true; }
   return false;
 }
-const STEAL_R  =120;                        // 腐敗菌が増える時、この範囲の乳酸菌を2匹奪う
-// ★pH＝ゲージそのものを増殖率に効かせる。酸性に傾くほど腐敗菌は増えられず、
-//   乳酸菌は増えやすい。これが無いと両者が釣り合ったまま決着が付かない（実測で400秒無決着）。
-//   実際の発酵でも、pHが下がり切ると腐敗菌は増殖できなくなる＝こじつけではない
-function foeSuppress(){ return 1.0+0.4*(1-gauge); }
-function allyBoost(){ return gauge; }
-function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n; }
-let ally0=1, foe0=1, gauge=0.5, phase='play', playT=0;
-let foeAcc=0, allyAcc=0, allyKillAcc=0;
+let gauge=0.5, phase='play', playT=0;
+let foeAcc=0, allyAcc=0;
 let rods=[];   // {x,y,ang,joined,order,phase}
 let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
 let bits=[];   // 溶けカス粒子
@@ -374,8 +384,7 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  ally0=rods.length; foe0=foes.length; allyKillAcc=0;
-  ammo=[]; amAcc=0; amSeen=false; lunges=[]; gauge=0.5; phase='play'; playT=0;
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; lunges=[]; gauge=0.5; phase='play'; playT=0;
   foeAcc=0; allyAcc=0; loupeA=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -569,7 +578,7 @@ function finishGame(win,how){
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
 function updateHud(){
   elCnt.textContent=totalSealed;
-  elAlly.textContent=livingRods(); elFoe.textContent=foes.filter(f=>!f.dead).length;
+  elAlly.textContent=livingRods(); elFoe.textContent=livingFoes();
 }
 
 // --- 鎖が腐敗菌に触れたら四散（両側リスク）---
@@ -753,8 +762,10 @@ function breakSnd(n){ if(!A)return; try{
 
 // ---- 描画 ----
 let tms=0;
-function drawRod(x,y,ang,joined,alpha,weak){
-  alpha=alpha==null?1:alpha;
+// divp=二分裂の進み具合(0〜1)。伸びて真ん中がくびれ、割れて2つになる。
+// ★これが知育の芯：乳酸菌は真ん中に隔壁を作って2つに分かれて増える（二分裂）
+function drawRod(x,y,ang,joined,alpha,weak,divp){
+  alpha=alpha==null?1:alpha; divp=divp||0;
   g.save(); g.translate(x,y); g.rotate(ang); g.globalAlpha=alpha;
   if(joined){ g.shadowColor='rgba(140,240,200,.9)'; g.shadowBlur=10; }
   // weak=餓死しかけ＝退色（乳白→くすんだ灰）
@@ -769,9 +780,28 @@ function drawRod(x,y,ang,joined,alpha,weak){
     g.beginPath(); g.arc(-R*0.28,-R*0.28,R*0.34,0,7);
     g.fillStyle='rgba(255,255,255,.3)'; g.fill();
   }else{
-    const h=RLEN/2, r=RW/2;
-    g.beginPath(); g.arc(-h,0,r,Math.PI/2,Math.PI*1.5); g.arc(h,0,r,-Math.PI/2,Math.PI/2); g.closePath();
-    g.fill(); g.stroke();
+    const r=RW/2;
+    if(divp<0.62){
+      // ① 2倍の長さまで伸びながら、真ん中に隔壁ができる
+      const L=RLEN*(1+divp/0.62), h=L/2;
+      g.beginPath(); g.arc(-h+r,0,r,Math.PI/2,Math.PI*1.5); g.arc(h-r,0,r,-Math.PI/2,Math.PI/2); g.closePath();
+      g.fill(); g.stroke();
+      if(divp>0.10){
+        const w=(divp-0.10)/0.52;
+        g.save(); g.strokeStyle='rgba(11,15,20,'+(0.35+0.5*w)+')';
+        g.lineWidth=Math.max(1.1,r*1.15*w);
+        g.beginPath(); g.moveTo(0,-r*(1-0.18*w)); g.lineTo(0,r*(1-0.18*w)); g.stroke(); g.restore();
+      }
+    }else{
+      // ② 2本に割れて離れる（長さは元のまま＝1匹が2匹になった）
+      const t=(divp-0.62)/0.38, gap=RLEN*0.62*t;
+      const c=(RLEN+gap)/2, h=RLEN/2;
+      for(const sgn of [-1,1]){
+        const cx=sgn*c;
+        g.beginPath(); g.arc(cx-h+r,0,r,Math.PI/2,Math.PI*1.5); g.arc(cx+h-r,0,r,-Math.PI/2,Math.PI/2); g.closePath();
+        g.fill(); g.stroke();
+      }
+    }
   }
   g.restore(); g.globalAlpha=1;
 }
@@ -796,15 +826,30 @@ function drawFoeCocci(f,warn){
     const rs=f.resist||0;
     g.save(); g.translate(f.x,f.y); g.rotate((f.ang||0)+f.phase*0.12); g.globalAlpha=k;
     const R=f.r*0.52*k;
+    // 二分裂：ふくらむ→くびれる→房ごと2つに割れて離れる
+    const dv=f.div||0;
+    const swell=1+0.22*Math.min(1,dv/0.55);
+    const t2=dv>0.55? (dv-0.55)/0.45 : 0;
+    const sep=f.r*1.30*t2;
+    const parts= t2>0? [-1,1] : [0];
     if(!f.dead){ g.shadowColor='rgba(190,70,120,.45)'; g.shadowBlur=7; }
-    for(const c of foeClump(f)){
-      g.beginPath(); g.arc(c.dx*k, c.dy*k, R*c.s, 0, 7);
-      g.fillStyle= f.dead? 'rgba(160,96,70,'+k+')'
-        : (rs>0? 'rgba('+Math.round(150+90*rs)+',66,92,.96)':'rgba(168,80,118,.95)');
-      g.strokeStyle= f.dead? 'rgba(200,140,120,.5)':'rgba(226,138,178,.75)';
-      g.lineWidth=1; g.fill(); g.stroke();
+    for(const sgn of parts){
+      const sc=(parts.length>1? 0.80 : swell);
+      for(const c of foeClump(f)){
+        g.beginPath(); g.arc(c.dx*k*sc, c.dy*k*sc+sgn*sep/2, R*c.s*sc, 0, 7);
+        g.fillStyle= f.dead? 'rgba(160,96,70,'+k+')'
+          : (rs>0? 'rgba('+Math.round(150+90*rs)+',66,92,.96)':'rgba(168,80,118,.95)');
+        g.strokeStyle= f.dead? 'rgba(200,140,120,.5)':'rgba(226,138,178,.75)';
+        g.lineWidth=1; g.fill(); g.stroke();
+      }
     }
     g.shadowBlur=0;
+    if(dv>0.12&&dv<0.6){   // くびれ（隔壁）
+      const w=(dv-0.12)/0.48;
+      g.save(); g.strokeStyle='rgba(74,26,54,'+(0.30+0.40*w)+')'; g.lineWidth=Math.max(1,f.r*0.17*w);
+      g.lineCap='round';
+      g.beginPath(); g.moveTo(-f.r*0.52,0); g.lineTo(f.r*0.52,0); g.stroke(); g.restore();
+    }
     if(!f.dead){   // 房らしいハイライト
       for(const c of foeClump(f)){
         g.beginPath(); g.arc(c.dx*k-R*c.s*0.3, c.dy*k-R*c.s*0.3, R*c.s*0.3, 0, 7);
@@ -922,31 +967,39 @@ function loop(ts){
   }
 
 
-  // ---- 勢力の増減（食品の中の取り合い）----
+  // ---- 勢力の増減（食品という限られた場所の取り合い）----
   if(phase==='play'){
     playT+=dt;
-    const nF=foes.filter(f=>!f.dead).length, nA=livingRods();
-    // ① 腐敗菌が分裂して増える（酸が弱いほど速い／混みすぎると鈍る）
-    if(nF>0){
-      const cap=Math.max(4, foe0*FOE_CAP_K);
-      foeAcc += FOE_GROW*(nF/Math.max(1,foe0))*Math.max(0,1-nF/cap)*foeSuppress()*dt;
-      while(foeAcc>=1){
-        foeAcc-=1;
-        const src=foes.filter(f=>!f.dead);
-        const par=src[(Math.random()*src.length)|0];
-        if(par){
-          const a=rnd(0,6.283), d=rnd(18,46);
-          spawnFoe(); const nf=foes[foes.length-1];
-          nf.x=Math.max(par.r+8, Math.min(worldW()-par.r-8, par.x+Math.cos(a)*d));
-          nf.y=Math.max(PLAY_TOP+par.r+8, Math.min(worldBot()-par.r-8, par.y+Math.sin(a)*d));
-          nf.r=par.r*rnd(.85,1.05); nf.born=clock;
-          for(let k=0;k<2;k++) killAllyNear(nf.x,nf.y,STEAL_R);   // 居場所を奪う
-        }
+    const nF=livingFoes(), nA=livingRods();
+    const cap=capCount();
+    const room=Math.max(0, 1-(nA+nF)/cap);      // 食品に残っている余地
+
+    // ① 腐敗菌が二分裂する（酸が弱いほど速い）
+    foeAcc += GF*nF*room*foeSuppress()*dt;
+    while(foeAcc>=1){
+      foeAcc-=1;
+      const src=foes.filter(f=>!f.dead&&!f.div);
+      const par=src[(Math.random()*src.length)|0];
+      if(par) par.div=0.0001; else break;
+    }
+    for(const f of foes){
+      if(!f.div||f.dead) continue;
+      f.div+=dt/DIV_T;
+      if(f.div>=1){
+        f.div=0;
+        const a=(f.ang||0)+f.phase*0.12+Math.PI/2, d=f.r*0.65;
+        spawnFoe(); const nf=foes[foes.length-1];
+        nf.x=Math.max(f.r+8, Math.min(worldW()-f.r-8, f.x+Math.cos(a)*d));
+        nf.y=Math.max(PLAY_TOP+f.r+8, Math.min(worldBot()-f.r-8, f.y+Math.sin(a)*d));
+        nf.r=f.r*rnd(.92,1.02); nf.born=clock; nf.ang=f.ang; nf.wa=f.wa+rnd(-1,1);
+        f.x-=Math.cos(a)*d; f.y-=Math.sin(a)*d;
+        for(let k=0;k<STEAL_N;k++) killAllyNear(nf.x,nf.y,STEAL_R);   // 居場所と栄養を奪う
       }
     }
-    // ①' アンモニアの靄を噴く
+
+    // ② アンモニアの靄を噴く
     if(nF>0){
-      amAcc += AM_RATE*(nF/Math.max(1,foe0))*dt;
+      amAcc += AM_RATE*(nF/Math.max(1,startCount()))*dt;
       while(amAcc>=1){
         amAcc-=1;
         const src=foes.filter(f=>!f.dead);
@@ -955,51 +1008,49 @@ function loop(ts){
           if(!amSeen){ amSeen=true; tipMsg('アンモニアで酸が中和される！ 靄の中では溶かせない'); } }
       }
     }
-    for(let i=ammo.length-1;i>=0;i--){ const a=ammo[i]; a.t+=dt;
+    for(let i2=ammo.length-1;i2>=0;i2--){ const a=ammo[i2]; a.t+=dt;
       a.r=AM_R*(0.3+0.7*Math.min(1,a.t/1.2));
-      if(a.t>=a.life) ammo.splice(i,1); }
+      if(a.t>=a.life) ammo.splice(i2,1); }
 
-    // ② 腐敗が優勢な間、乳酸菌はじわじわ死ぬ（基質を奪われる）
-    allyKillAcc += ALLY_LOSS*(nF/Math.max(1,foe0))*(1-gauge)*nA*dt;
-    while(allyKillAcc>=1){ allyKillAcc-=1;
-      const src=foes.filter(f=>!f.dead);
-      const f0=src[(Math.random()*src.length)|0];
-      if(f0) killAllyNear(f0.x,f0.y,260); else break;
+    // ③ 乳酸菌も二分裂する（酸が優勢なほど速い）＝知育の芯
+    allyAcc += GA*nA*room*allyBoost()*dt;
+    while(allyAcc>=1){
+      allyAcc-=1;
+      const src=rods.filter(r=>!r.joined&&!r.dying&&!r.div);
+      const par=src[(Math.random()*src.length)|0];
+      if(par) par.div=0.0001; else break;
     }
-    // ③ 乳酸菌も分裂して戻る（酸が優勢な時ほど速い）
-    if(nA<ally0){
-      allyAcc += ALLY_GROW*allyBoost()*ally0*(1-nA/ally0)*dt;
-      let guard=0;
-      while(allyAcc>=1 && livingRods()<ally0 && guard++<40){
-        allyAcc-=1;
-        const src=rods.filter(r=>!r.joined&&!r.dying);
-        const par=src.length? src[(Math.random()*src.length)|0] : rods[0];
-        if(!par) break;
-        const a=rnd(0,6.283), d=rnd(14,34);
-        rods.push({x:Math.max(24,Math.min(worldW()-24,par.x+Math.cos(a)*d)),
-                   y:Math.max(PLAY_TOP,Math.min(worldBot(),par.y+Math.sin(a)*d)),
-                   ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28,
+    for(const r of rods){
+      if(!r.div) continue;
+      if(r.joined||r.dying!=null){ r.div=0; continue; }   // 掴まれたら分裂は中断
+      r.div+=dt/DIV_T;
+      if(r.div>=1){
+        r.div=0;
+        const d=RLEN*0.81;
+        rods.push({x:Math.max(24,Math.min(worldW()-24,r.x+Math.cos(r.ang)*d)),
+                   y:Math.max(PLAY_TOP,Math.min(worldBot(),r.y+Math.sin(r.ang)*d)),
+                   ang:r.ang, joined:false, order:0, phase:Math.random()*6.28,
                    vx:0,vy:0,vr:0, doom:0, spent:0, dead:false, born:clock,
-                   wa:rnd(0,6.283), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
+                   wa:r.wa+rnd(-.8,.8), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
+        r.x-=Math.cos(r.ang)*d; r.y-=Math.sin(r.ang)*d;
+        if(!divSeen){ divSeen=true; tipMsg('乳酸菌は真ん中でくびれて2つに分かれる＝二分裂'); }
       }
-      if(allyAcc>2) allyAcc=2;
     }
-    // ④ ゲージ＝数の比。急に飛ばず、押し合うように動く
-    const A=nA/Math.max(1,ally0), F=nF/Math.max(1,foe0);
-    let target=(A<=0)?0:(F<=0?1:Math.pow(A,GAUGE_P)/(Math.pow(A,GAUGE_P)+Math.pow(F,GAUGE_P)));
-    target=Math.max(0, target-Math.min(0.55, ammo.length*AM_PUSH));   // 靄の分だけ押し戻される
-    const step=GAUGE_SPD*dt;
-    gauge += Math.max(-step, Math.min(step, target-gauge));
-    if(gauge>1) gauge=1; if(gauge<0) gauge=0;
+
+    // ④ ゲージ＝そのまま頭数の比
+    const target=(nA+nF>0)? nA/(nA+nF) : 0.5;
+    gauge += (target-gauge)*Math.min(1, dt*GAUGE_SPD*6);
+    gauge=Math.max(0,Math.min(1,gauge));
     updateBar();
     const left=Math.max(0,TIME_LIMIT-playT);
     elTime.textContent=Math.ceil(left);
     elTime.style.color= left<=10? '#ff9a80' : '#bfe9d2';
-    if(gauge>=WIN_AT) finishGame(true,'ko');
-    else if(gauge<=LOSE_AT || nA===0) finishGame(false,'ko');
+    if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
+    else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
     else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
     updateHud();
   }
+
   // 消えかけの乳酸菌を薄くして消す（毎フレーム大量に入れ替わるので、点滅して見えないように）
   for(let i=rods.length-1;i>=0;i--){ const r=rods[i];
     if(r.dying!=null){ r.dying-=dt; if(r.dying<=0) rods.splice(i,1); } }
@@ -1178,7 +1229,7 @@ function loop(ts){
     }
     if(r.dying!=null) alpha*=Math.max(0,r.dying/0.35);
     else if(r.born!=null && clock-r.born<0.35) alpha*=Math.max(0,(clock-r.born)/0.35);
-    drawRod(r.x,r.y,r.ang+wob,false,alpha,weak);
+    drawRod(r.x,r.y,r.ang+wob,false,alpha,weak,r.div);
   }
   rods=rods.filter(r=>!r.dead);
   // つながった味方

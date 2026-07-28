@@ -39,15 +39,14 @@
 
 <h2>■ 本命：囲って倒す（阻害要素の潰し込み中）</h2>
 
-<a class="card" href="feel-classic.html?v=36">
+<a class="card" href="feel-classic.html?v=37">
   <span class="tag t-new">これ</span>
   <div class="name">ズタッと囲う ─ 目的とバランスが入った</div>
-  <div class="desc" style="margin-bottom:10px"><b>フィールドは食品（ぬか床）。乳酸と腐敗が1本のゲージで押し合います。</b>割合は<b>生きている乳酸菌の数と腐敗菌の数の比</b>でリアルタイムに動き、<b>90秒の制限時間内に押し込んだ量で勝敗</b>が決まります（途中で完全支配したら完封）。<br>
-  こじつけを避けるため、実際の発酵と同じ<b>基質の取り合い</b>にしました。腐敗菌は<b>自分で分裂して増え</b>、増えるたびに近くの乳酸菌の居場所を奪う。乳酸菌も分裂して戻る。<b>倒した数だけ湧き直す旧仕様は廃止</b>しました（敵が永久に減らずゲージが構造的に進まないため）。<br>
-  さらに<b>ゲージそのもの＝pHが増殖率に効きます</b>。酸性に傾くほど腐敗菌は増えられず乳酸菌は増えやすい。これが無いと拮抗したまま決着が付きません（実測：240秒無決着）。<br>
-  <b>敵の攻撃＝アンモニアの靄。</b>腐敗菌はタンパク質を分解して<b>アンモニアを出し、pHを上げます</b>（実際に起きること）。靄の中では<b>①乳酸菌を拾えない ②囲んでも溶けない</b>（酸が中和される）<b>③ゲージが腐敗側へ押し戻る</b>。触れても死なないので理不尽な即死は作らず、「近寄れない場所」で盤面に圧力をかけます。靄の中の乳酸菌はくすんで見えるので、拾えない理由が一目で分かります。<br>
-  <b>腐敗菌が乳酸菌を奪う瞬間も見えるようにしました</b>（今までは裏で消えていて何が起きたか分からなかった）。<br>
-  <b>難易度を上げ直しました。</b>初期設定は緩すぎて94%の圧勝になったので、腐敗の増殖を2.7倍にし、ゲージの効きを鈍らせて押し込むのに実力が要るようにしています。90秒後の乳酸%は <b>放置23／15匹分32／30匹分43／45匹分61／60匹分91</b>、80匹分で完封。</div>
+  <div class="desc" style="margin-bottom:10px"><b>フィールドは食品（ぬか床）。乳酸菌と腐敗菌が100匹ずつで始まり、90秒後に数が多い方が勝ちです。</b>ゲージは<b>そのまま頭数の比</b>なので、1匹倒すごとに約1%動くのが見えます。<br>
+  <b>両者とも二分裂で増えます</b>——伸びて真ん中がくびれ、隔壁ができて2つに割れる。乳酸菌も腐敗菌も同じ増え方をするので、<b>限られた食品の中で場所と栄養を奪い合っている</b>のがそのまま見えます（知育の芯）。<br>
+  <b>pHが増殖率に効きます。</b>酸性に傾くほど腐敗菌は増えられず乳酸菌は増えやすい。だから<b>押し込むほど味方が濃くなって鎖が伸び</b>、逆に負けていると腐敗菌だらけになります（上手いプレイで味方17→56匹/画面、放置だと敵17→40匹/画面）。<br>
+  <b>敵の攻撃＝アンモニアの靄。</b>腐敗菌はタンパク質を分解してアンモニアを出しpHを上げます（実際の現象）。靄の中では<b>乳酸菌を拾えず、囲んでも溶けません</b>。触れても死なないので理不尽な即死は作らず、「近寄れない場所」で圧力をかけます。<br>
+  数値は机上シミュレーションで決定。90秒後の乳酸%は <b>放置23／15匹分40／30匹分56／45匹分69／60匹分80／80匹分90</b>。</div>
   <div class="desc">結論：<b>桿菌を繋いで囲って倒すのが、ゲームとして一番成立していた</b>。問題は手触りではなく<b>ハードの制約による操作の阻害</b>だったので、そこを1つずつ潰します。今回直した3つ：<br>
   <b>① 手のひらが画面をかすると鎖が丸ごと消えていた</b>（重大）。タッチが増えるたびに鎖を切り離す処理が走っていました。<b>最初の指だけを操作に使い、他の接触は完全に無視</b>します。アプリが背面に回った時も握りを解きます。<br>
   <b>② 最高速を出すには画面のいちばん端まで指を運ぶ必要があった</b>。iPhoneの下端はホーム、上端は通知のジェスチャ帯なので、疾走するたびにOSに指を奪われていました（＝鎖が消える）。<b>端の手前78%で最高速に達する</b>ようにしました（実測：89%地点で1146px/s、端で1148px/s＝ほぼ同じ）。指先の前に余白が残るので見通しも良くなります。<br>
@@ -58,7 +57,7 @@
 
 <h2>■ 却下：固める</h2>
 
-<a class="card dim" href="feel-curd.html?v=36">
+<a class="card dim" href="feel-curd.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">固める ─ 牛乳がぷるんとヨーグルトになる</div>
   <div class="desc"><b>今までのＸは全部「守る＝減らす・維持する」だった</b>ので、原理的に快感も達成感も出ませんでした。ＺもＹも「自分の操作で<b>何かが生まれる・変わる</b>」だから成立していた。<br>
@@ -70,7 +69,7 @@
 
 <h2>■ 塗る（ひとつ前）</h2>
 
-<a class="card dim" href="feel-acid.html?v=36">
+<a class="card dim" href="feel-acid.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">酸で塗る ─ 通った所がその場で酸性になる</div>
   <div class="desc">Ｚ「擦る＝変える」／Ｙ「ちぎる＝増やす」／Ｘ<b>「塗る＝守る」</b>。<br>
@@ -82,7 +81,7 @@
 
 <h2>■ 却下：分裂編</h2>
 
-<a class="card dim" href="feel-divide.html?v=36">
+<a class="card dim" href="feel-divide.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">分裂編 ─ 温めて、切って、伸ばす</div>
   <div class="desc"><b style="color:#e8c4c4">却下（2026-07-28）：待たされる／お使い感・緊張がない・伸ばす意味がない・コンセプトごと違う、の全部に該当。</b>切る許可をゲーム側が出すまで何もできない＝また「動詞が準備」になっていた。<br>
@@ -96,7 +95,7 @@
 
 <h2>■ つなぐこと自体を報酬にする</h2>
 
-<a class="card" href="feel-sweep.html?v=36">
+<a class="card" href="feel-sweep.html?v=37">
   <span class="tag t-old">ひとつ前</span>
   <div class="name">つないで薙ぎ払う</div>
   <div class="desc">前2作は<b>擦った所がその場で糖になる／ちぎった瞬間に増える</b>＝1動作＝1ご褒美でした。囲む方式は「集める→回り込む→閉じる」の3段階を踏まないと報酬が出ず、<b>動詞が"準備"</b>になっていました。<br>
@@ -105,7 +104,7 @@
 
 <h2>■ 囲む版の設計メモ（同じファイル）</h2>
 
-<a class="card dim" href="feel-classic.html?v=36">
+<a class="card dim" href="feel-classic.html?v=37">
   <span class="tag t-old">解説</span>
   <div class="name">ズタッと囲う（これまでの経緯）</div>
   <div class="desc">味方は<b>桿菌（乳酸桿菌）</b>、敵は<b>球菌の房（ブドウ球菌）</b>。乳酸菌が実際に抑える食中毒菌で、形が全く違うので一目で区別できます。なぞって乳酸菌を繋ぎ、<b>輪で囲めば内側は全部その場で溶ける</b>。<b>腐敗菌に触れれば鎖は弾け飛ぶ</b>。分かりやすさの核はこの2つだけで、容量制・消耗・軌跡の蒸発など<b>その場で結果が出ない仕組みは全て外しました</b>。<br>
@@ -119,19 +118,19 @@
 
 <h2>■ 試したが的を外した案</h2>
 
-<a class="card dim" href="feel-contain.html?v=36">
+<a class="card dim" href="feel-contain.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">囲って増殖を抑える</div>
   <div class="desc">乳酸＝静菌という正確な生物学で作った版。衝突は消えたが、その場で結果が出ないため意味が分かりづらく面白くなかった。</div>
 </a>
 
-<a class="card dim" href="feel-wall.html?v=36">
+<a class="card dim" href="feel-wall.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">酸の壁を築く</div>
   <div class="desc">腐敗を面にして壁でせき止める版。</div>
 </a>
 
-<a class="card dim" href="feel-turf.html?v=36">
+<a class="card dim" href="feel-turf.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">陣取り</div>
   <div class="desc">マス目で場所を取り合う版。</div>
@@ -139,25 +138,25 @@
 
 <h2>■ 過去の実験（比較用）</h2>
 
-<a class="card dim" href="feel-chain.html?v=36">
+<a class="card dim" href="feel-chain.html?v=37">
   <span class="tag t-old">核だけ</span>
   <div class="name">磁石で吸い付く核だけ</div>
   <div class="desc">敵もルールも無し。気持ち良いと確認済みの手触りそのもの（こちらは桿菌のまま）。</div>
 </a>
 
-<a class="card dim" href="feel-tap.html?v=36">
+<a class="card dim" href="feel-tap.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">タップで繋ぐ</div>
   <div class="desc">なぞりを捨てて桿菌を順にタップする案。手触りが素っ気ない。</div>
 </a>
 
-<a class="card dim" href="feel-splice.html?v=36">
+<a class="card dim" href="feel-splice.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">継ぎ足しで繋ぐ</div>
   <div class="desc">指を離しても鎖が残る案。まだ手が邪魔だった。</div>
 </a>
 
-<a class="card dim" href="feel-seal.html?v=36">
+<a class="card dim" href="feel-seal.html?v=37">
   <span class="tag t-no">却下</span>
   <div class="name">ひと続きでなぞって囲む</div>
   <div class="desc">点の敵を避けながら囲む方式。狭い画面で避けられずストレスの原因になった版。</div>
@@ -168,6 +167,6 @@
   衝突を無くす／静菌にする／経済を作る、といった"正しい"改良は全て遅延型で、
   「今の操作が正しかったのか」が分からなくなり面白さを失った。
 </div>
-<div id="ver">v36 (07-28 17:34)</div>
+<div id="ver">v37 (07-29 06:56)</div>
 </body>
 </html>
