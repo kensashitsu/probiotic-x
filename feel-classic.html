@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v39 (07-29 07:36)';
+const BUILD='v40 (07-29 08:31)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -121,7 +121,12 @@ const FOE_SHAPE=(_old||_q.get('foe')==='blob')?'blob':(_q.get('foe')==='rod'?'ro
 const SCALE=Math.max(0.5, Math.min(2, +(_q.get('scale')||0.85)));
 const RLEN=15*SCALE, RW=6.2*SCALE;   // 桿菌の長さ・太さ
 const SPACING=(PLAYER_SHAPE==='cocci'? 10.2:15.5)*SCALE;   // 鎖の玉間隔（球菌は詰める）
-const CATCH_R=40*SCALE;              // 吸い付く射程
+// ★同数スタート(100対100)にしたら味方の密度が1画面68匹→17匹に落ち、繋ぐのが難しくなった。
+//   頭数を増やすとゲージが鈍る（200対200だと30匹倒しても15%しか動かない）ので、
+//   密度と拾いやすさの側で直す：マップを少し狭く＋射程を広く＋実際に吸い寄せる
+const CATCH_R=+(_q.get('catch')||58)*SCALE;   // 吸い付く射程
+const PULL_R=CATCH_R*2.2;                     // ここから引き寄せが始まる
+const PULL_V=+(_q.get('pull')||150);          // 引き寄せの最大速度(px/秒)
 // ★実際の大きさに合わせる。乳酸桿菌は約1×3.5µm、ブドウ球菌は直径約0.8〜1.0µm。
 //   つまり「球菌の直径 ≒ 桿菌の太さ」が正しい。以前は桿菌の太さの2〜3倍（ほぼ桿菌の長さ）
 //   もあって、実物よりかなり大きかった。?foer=1.6 のように倍率で見比べられる
@@ -314,8 +319,10 @@ const TRAIL_LIFE=9999;   // 時間では消さない（急かす圧は入れな�
 //   たくさん繋ぐほど大きく囲める＝一度に多く溶かせる。
 //   容量制（囲んだ後に何匹まで溶けるか）は却下済み＝結果が閉じた後にしか分からず遅延型だった。
 //   こちらは「後ろの帯が実際に消えている」ので、囲む前から今どこまで囲めるか見えている。
-const ACID_BASE=+(_q.get('abase')||160)*SCALE;  // 素の長さ（ほぼ囲めない）
-const ACID_PER =+(_q.get('aper') ||34)*SCALE;   // 桿菌1匹あたり伸びる長さ
+//   ★最初の設定(160+34/匹)は厳しすぎて「囲うのが難しい」と却下。10匹繋いでも半径68px＝
+//     画面幅の1/5しか囲めなかった。300+55/匹にして、10匹で半径115px＝画面の6割を囲める。
+const ACID_BASE=+(_q.get('abase')||300)*SCALE;  // 素の長さ（小さい輪なら作れる）
+const ACID_PER =+(_q.get('aper') ||55)*SCALE;   // 桿菌1匹あたり伸びる長さ
 function usableTrail(){ return ACID_BASE + joinedCount*ACID_PER; }
 // ★手の死角対策。指と手のひらは半径55〜64pxを覆うので、近くの腐敗菌には
 //   「手の外側まではみ出す大きさ」の警告リングを出す。操作系は変えない
@@ -1229,10 +1236,18 @@ function loop(ts){
     }
     // ★靄の中は酸が中和されて拾えない。理由が見えるようにくすませる
     if(ammo.length && inAmmonia(r.x,r.y)){ weak=true; alpha*=0.55; }
-    if(dragging && r.spent<=0){ const d=Math.hypot(r.x-head.x,r.y-head.y);
-      if(d<CATCH_R*2.2){ const a=Math.atan2(head.y-r.y,head.x-r.x);
+    // ★磁石で吸い付く手触りの核。近づくほど強く引かれ、向きも頭を向く
+    if(dragging && r.spent<=0 && r.dying==null){
+      const d=Math.hypot(r.x-head.x,r.y-head.y);
+      if(d<PULL_R && d>0.01){
+        const t=1-d/PULL_R;                    // 0（遠い）〜1（目前）
+        const a=Math.atan2(head.y-r.y,head.x-r.x);
+        const v=PULL_V*t*t*dt;
+        r.x+=Math.cos(a)*v; r.y+=Math.sin(a)*v;
         let da=a-r.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
-        r.ang+= da*(1-d/(CATCH_R*2.2))*0.12; } }
+        r.ang+= da*t*0.16;
+      }
+    }
     // 餓死タイマー（弾け飛んだ菌のみ）：色はそのまま、点滅で"要救出"を示す。死が近いほど点滅が速い
     if(r.doom>0){
       r.doom-=dt;
