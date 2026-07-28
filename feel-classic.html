@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v35 (07-28 17:21)';
+const BUILD='v36 (07-28 17:34)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -317,24 +317,37 @@ let loupeA=0;                            // ルーペの表示量（滑らかに
 //    ゲージが構造的に進まないので廃止した。
 // ============================================================
 // ★数値は机上シミュレーションで決めた（撃破速度ごとの決着時間を目標に探索）。
-//   放置=73秒で腐る／8匹分=152秒で腐る／15匹分=312秒で漬かる／25匹分=124秒／40匹分=67秒。
-//   腕前がそのまま結果に出る幅になっている
-const FOE_GROW =+(_q.get('fgrow')||0.30);   // 腐敗菌の分裂の速さ（匹/秒の基準値）
+//   90秒後の乳酸%：放置23／15匹分32／30匹分43／45匹分61／60匹分91／80匹分で完封。
+//   ※最初の設定は緩すぎて94%の圧勝になったので、腐敗の増殖を2.7倍に上げ、
+//     ゲージの効き(GAUGE_P)を鈍らせて、押し込むのに実力が要るようにした
+const FOE_GROW =+(_q.get('fgrow')||0.80);   // 腐敗菌の分裂の速さ（匹/秒の基準値）
 const FOE_CAP_K=+(_q.get('fcap')||2.4);     // 腐敗菌の上限＝初期数の何倍か
-const ALLY_GROW=+(_q.get('agrow')||1.6);    // 乳酸菌の分裂の速さ（酸が優勢な時ほど速い）
-const ALLY_LOSS=+(_q.get('aloss')||0.12);   // 腐敗に押されて乳酸菌が減る速さ
-const GAUGE_P  =+(_q.get('gp')||3);         // ゲージの効き。大きいほど数の差が大きく振れる
+const ALLY_GROW=+(_q.get('agrow')||2.0);    // 乳酸菌の分裂の速さ（酸が優勢な時ほど速い）
+const ALLY_LOSS=+(_q.get('aloss')||0.16);   // 腐敗に押されて乳酸菌が減る速さ
+const GAUGE_P  =+(_q.get('gp')||1.2);         // ゲージの効き。大きいほど数の差が大きく振れる
 const GAUGE_SPD=+(_q.get('gspd')||0.16);    // ゲージが動く最大速度（割合/秒）
 // ★ナワバリバトル方式：制限時間内にゲージをどれだけ自分側へ押し込めたかで勝敗。
 //   途中で完全に押し切ったらノックアウト（完封）で即終了。
 //   これが無いと拮抗したまま延々終わらない（実測：自動プレイで240秒決着せず）
 const TIME_LIMIT=+(_q.get('time')||90);
 const WIN_AT=0.94, LOSE_AT=0.06;            // 途中で押し切ったら完封
+// ★敵の攻撃＝アンモニアの靄。腐敗菌はタンパク質を分解してアンモニアを出し、pHを上げる（実際の現象）。
+//   靄の中では ①乳酸菌を拾えない ②囲んでも溶けない（酸が中和される）③ゲージが腐敗側へ押し戻る。
+//   触れても死なない＝理不尽な即死を作らず、「近寄れない場所」で盤面に圧力をかける方式にした
+const AM_RATE=+(_q.get('am')||0.35);   // 靄の発生（個/秒・腐敗菌が多いほど増える）
+const AM_LIFE=+(_q.get('amlife')||9);  // 靄の寿命(秒)
+const AM_R   =72*SCALE;                // 靄の半径
+const AM_PUSH=0.012;                   // 靄1つあたりゲージを押し戻す量
+let ammo=[], amAcc=0, amSeen=false;
+function inAmmonia(x,y){
+  for(const a of ammo){ if(a.t<a.life && Math.hypot(x-a.x,y-a.y)<a.r) return true; }
+  return false;
+}
 const STEAL_R  =120;                        // 腐敗菌が増える時、この範囲の乳酸菌を2匹奪う
 // ★pH＝ゲージそのものを増殖率に効かせる。酸性に傾くほど腐敗菌は増えられず、
 //   乳酸菌は増えやすい。これが無いと両者が釣り合ったまま決着が付かない（実測で400秒無決着）。
 //   実際の発酵でも、pHが下がり切ると腐敗菌は増殖できなくなる＝こじつけではない
-function foeSuppress(){ return 0.35+1.4*(1-gauge); }
+function foeSuppress(){ return 1.0+0.4*(1-gauge); }
 function allyBoost(){ return gauge; }
 function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n; }
 let ally0=1, foe0=1, gauge=0.5, phase='play', playT=0;
@@ -361,13 +374,15 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  ally0=rods.length; foe0=foes.length; allyKillAcc=0; gauge=0.5; phase='play'; playT=0;
+  ally0=rods.length; foe0=foes.length; allyKillAcc=0;
+  ammo=[]; amAcc=0; amSeen=false; lunges=[]; gauge=0.5; phase='play'; playT=0;
   foeAcc=0; allyAcc=0; loupeA=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
   updateHud(); updateBar();
 }
 // 腐敗に押しのけられた乳酸菌を1匹消す（掴んでいる桿菌は奪われない）
+let lunges=[];   // 腐敗菌が乳酸菌に襲いかかる線（見せるためだけ）
 function killAllyNear(x,y,R){
   let bi=-1, bd=R;
   for(let i=0;i<rods.length;i++){ const r=rods[i];
@@ -375,6 +390,11 @@ function killAllyNear(x,y,R){
     const d=Math.hypot(r.x-x,r.y-y); if(d<bd){ bd=d; bi=i; } }
   if(bi<0) return false;
   const r=rods[bi]; r.dying=0.35;
+  // どの腐敗菌が奪ったのかを見せる（今まで裏で消えていて、何が起きたか分からなかった）
+  let nf=null, nd=1e9;
+  for(const f of foes){ if(f.dead) continue;
+    const d=Math.hypot(f.x-r.x,f.y-r.y); if(d<nd){ nd=d; nf=f; } }
+  if(nf && nd<420){ lunges.push({fx:nf.x,fy:nf.y,tx:r.x,ty:r.y,life:1}); nf.lunge=1; }
   for(let i=0;i<5;i++) bits.push({x:r.x,y:r.y, vx:rnd(-.7,.7),vy:rnd(-.9,.2), life:.8, r:rnd(.9,2.0)});
   return true;
 }
@@ -425,6 +445,7 @@ function catchNear(x,y){
     if(r.joined) continue;
     if(r.spent>0) continue;          // 消耗中は酸を出せない＝拾えない
     if(r.dying!=null) continue;      // 消えかけは掴めない
+    if(inAmmonia(r.x,r.y)) continue; // 靄の中は酸が中和されていて繋げない
     if(Math.hypot(r.x-x,r.y-y)<=CATCH_R){
       r.joined=true; r.order=orderSeq++; joinedCount++;
       r.doom=0; r.vx=0; r.vy=0; r.vr=0;   // 救出＝餓死タイマー解除
@@ -493,15 +514,16 @@ function doSeal(poly){
   // ★囲った内側は全部溶ける。容量制も消耗も入れない ─ その場で結果が出ることが
   //   このゲームの分かりやすさの核だった（後から足した仕組みは全て遅延型で、
   //   「今の操作が正しかったのか」がその場で分からなくなっていた）
-  let sealed=0;
+  let sealed=0, resisted=0;
   for(const f of foes){
     if(f.dead) continue;
     if(pointInPoly(f.x,f.y,poly)){
+      if(inAmmonia(f.x,f.y)){ f.resist=1; resisted++; continue; }   // 酸が中和されて効かない
       f.dead=true; f.dt=0; sealed++;
       for(let i=0;i<12;i++) bits.push({x:f.x,y:f.y, vx:rnd(-1.3,1.3),vy:rnd(-1.7,0.4), life:1, r:rnd(1.5,3.6)});
     }
   }
-  seals.push({poly, life:1, strong:joinedCount, partial:false});
+  seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
@@ -513,6 +535,7 @@ function doSeal(poly){
   }else{
     fizz(0, joinedCount);
   }
+  if(resisted>0){ resistSnd(resisted); if(sealed===0) tipMsg('靄の中では酸が効かない！ 靄が晴れるまで待つか、外の敵を狙え'); }
 }
 function updateBar(){
   const p=(gauge*100);
@@ -767,7 +790,8 @@ function foeClump(f){
   return f.clump;
 }
 function drawFoeCocci(f,warn){
-  const k=f.dead? Math.max(0,1-f.dt*3):1;
+  if(f.lunge>0) f.lunge=Math.max(0,f.lunge-0.045);
+  const k=(f.dead? Math.max(0,1-f.dt*3):1)*(1+(f.lunge||0)*0.35);
   if(k>0){
     const rs=f.resist||0;
     g.save(); g.translate(f.x,f.y); g.rotate((f.ang||0)+f.phase*0.12); g.globalAlpha=k;
@@ -920,6 +944,21 @@ function loop(ts){
         }
       }
     }
+    // ①' アンモニアの靄を噴く
+    if(nF>0){
+      amAcc += AM_RATE*(nF/Math.max(1,foe0))*dt;
+      while(amAcc>=1){
+        amAcc-=1;
+        const src=foes.filter(f=>!f.dead);
+        const f0=src[(Math.random()*src.length)|0];
+        if(f0){ ammo.push({x:f0.x,y:f0.y,r:AM_R*0.3,t:0,life:AM_LIFE,ph:rnd(0,6.28)});
+          if(!amSeen){ amSeen=true; tipMsg('アンモニアで酸が中和される！ 靄の中では溶かせない'); } }
+      }
+    }
+    for(let i=ammo.length-1;i>=0;i--){ const a=ammo[i]; a.t+=dt;
+      a.r=AM_R*(0.3+0.7*Math.min(1,a.t/1.2));
+      if(a.t>=a.life) ammo.splice(i,1); }
+
     // ② 腐敗が優勢な間、乳酸菌はじわじわ死ぬ（基質を奪われる）
     allyKillAcc += ALLY_LOSS*(nF/Math.max(1,foe0))*(1-gauge)*nA*dt;
     while(allyKillAcc>=1){ allyKillAcc-=1;
@@ -947,7 +986,8 @@ function loop(ts){
     }
     // ④ ゲージ＝数の比。急に飛ばず、押し合うように動く
     const A=nA/Math.max(1,ally0), F=nF/Math.max(1,foe0);
-    const target=(A<=0)?0:(F<=0?1:Math.pow(A,GAUGE_P)/(Math.pow(A,GAUGE_P)+Math.pow(F,GAUGE_P)));
+    let target=(A<=0)?0:(F<=0?1:Math.pow(A,GAUGE_P)/(Math.pow(A,GAUGE_P)+Math.pow(F,GAUGE_P)));
+    target=Math.max(0, target-Math.min(0.55, ammo.length*AM_PUSH));   // 靄の分だけ押し戻される
     const step=GAUGE_SPD*dt;
     gauge += Math.max(-step, Math.min(step, target-gauge));
     if(gauge>1) gauge=1; if(gauge<0) gauge=0;
@@ -1001,6 +1041,40 @@ function loop(ts){
   // 世界の縁（どこまで行けるか分かるように薄く）
   g.strokeStyle='rgba(120,200,180,.10)'; g.lineWidth=2;
   g.strokeRect(0,PLAY_TOP,worldW(),worldBot()-PLAY_TOP);
+
+  // アンモニアの靄（敵の攻撃）＝酸を中和する領域。
+  // 輪郭のある円だと"紫の玉"に見えてしまうので、ずれた靄を重ねて気体に見せる
+  for(const a of ammo){
+    if(!inView(a.x,a.y,a.r+50)) continue;
+    const k=Math.min(1,a.t/0.8)*Math.min(1,(a.life-a.t)/1.8);
+    for(let n=0;n<3;n++){
+      const ang=a.ph+n*2.1+clock*0.22*(n%2?1:-1);
+      const ox=Math.cos(ang)*a.r*0.22, oy=Math.sin(ang*1.3)*a.r*0.18;
+      const rr=a.r*(0.78+0.16*Math.sin(clock*0.9+a.ph+n));
+      const gr=g.createRadialGradient(a.x+ox,a.y+oy,0,a.x+ox,a.y+oy,rr);
+      gr.addColorStop(0,'rgba(184,132,232,'+(0.13*k)+')');
+      gr.addColorStop(0.55,'rgba(150,100,205,'+(0.085*k)+')');
+      gr.addColorStop(1,'rgba(120,80,180,0)');
+      g.fillStyle=gr; g.beginPath(); g.arc(a.x+ox,a.y+oy,rr,0,7); g.fill();
+    }
+    for(let i2=0;i2<6;i2++){                                     // 立ちのぼる泡
+      const t=((clock*0.42+i2*0.17+a.ph)%1);
+      const bx=a.x+Math.cos(a.ph+i2*1.7)*a.r*0.46, by=a.y+a.r*0.45-t*a.r*1.15;
+      g.beginPath(); g.arc(bx,by,2.6*SCALE*(1-t*0.7),0,7);
+      g.fillStyle='rgba(220,186,255,'+(0.42*k*(1-t))+')'; g.fill();
+    }
+  }
+  // 腐敗菌が乳酸菌を奪う瞬間
+  for(const L of lunges){ L.life-=dt*3.2;
+    if(L.life>0){
+      const t=1-L.life;
+      g.beginPath(); g.moveTo(L.fx,L.fy);
+      g.lineTo(L.fx+(L.tx-L.fx)*Math.min(1,t*1.6), L.fy+(L.ty-L.fy)*Math.min(1,t*1.6));
+      g.strokeStyle='rgba(226,120,170,'+(0.65*L.life)+')'; g.lineWidth=2.2*L.life+0.8; g.stroke();
+      g.beginPath(); g.arc(L.tx,L.ty,10*(1-L.life)+3,0,7);
+      g.strokeStyle='rgba(240,150,190,'+(0.5*L.life)+')'; g.lineWidth=2; g.stroke();
+    } }
+  lunges=lunges.filter(L=>L.life>0);
 
   // 腐敗菌
   for(const f of foes){ f.phase+=dt*(1+f.spin); if(f.dead) f.dt+=dt;
@@ -1083,6 +1157,8 @@ function loop(ts){
       r.spent-=dt; if(r.spent<0) r.spent=0;
       if(r.spent>0){ weak=true; alpha=0.32+0.10*Math.sin(r.phase*3); }
     }
+    // ★靄の中は酸が中和されて拾えない。理由が見えるようにくすませる
+    if(ammo.length && inAmmonia(r.x,r.y)){ weak=true; alpha*=0.55; }
     if(dragging && r.spent<=0){ const d=Math.hypot(r.x-head.x,r.y-head.y);
       if(d<CATCH_R*2.2){ const a=Math.atan2(head.y-r.y,head.x-r.x);
         let da=a-r.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
