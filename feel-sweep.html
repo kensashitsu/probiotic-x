@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>ズタッと囲う（原点版）</title>
+<title>つないで薙ぎ払う 実験</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
@@ -30,8 +30,8 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="ver"></div>
-<div id="hud"><div class="n">封じた <b id="cnt">0</b></div><div class="best" id="best"></div></div>
-<div id="tip">なぞって乳酸菌（桿菌）を繋ぎ 雑菌（ブドウ球菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
+<div id="hud"><div class="n">溶かした <b id="cnt">0</b></div><div class="best" id="best"></div></div>
+<div id="tip">なぞって乳酸菌を繋ぐほど 酸の範囲が広がる ─ 触れた雑菌はその場で溶ける</div>
 <button id="reset">まき直す</button>
 
 <script>
@@ -82,7 +82,7 @@ const FOE_R=13*SCALE;                // 腐敗菌の半径
 //   固定数だとSE3(375x667)は390x844比で湧き範囲の面積が68%＝密度が26%上がり渋滞する
 const REF_AREA=390*604, RODS_REF=64;
 // 敵の密度。狭い画面で通り道が無くなるのが避けられなさの主因なので既定を下げる
-const FOES_REF=+(new URLSearchParams(location.search).get('foes')||10);
+const FOES_REF=+(new URLSearchParams(location.search).get('foes')||20);   // 薙ぎ払う対象なので多め
 
 // 盤面の上下端はここで一元管理する（HUDとボタンを避ける分だけ空ける）
 const PLAY_TOP=110;
@@ -254,7 +254,7 @@ let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
 let bits=[];   // 溶けカス粒子
 let seals=[];  // 封印フラッシュ {poly,life}
 let shards=[]; // シャッターの破片フラッシュ
-let best=+(localStorage.getItem('sealBest')||0);
+let best=+(localStorage.getItem('sweepBest')||0);
 let totalSealed=0;
 let hitCd=0;   // 衝突クールダウン
 let shake=0;   // 画面揺れ
@@ -309,7 +309,6 @@ function moveTo(x,y){
   const last=path[path.length-1];
   if(Math.hypot(x-last.x,y-last.y)>3){ path.push({x,y,t:clock}); if(path.length>600)path.shift(); }
   head={x,y}; catchNear(x,y);
-  if(sealCooldown<=0) checkClose();
 }
 function end(){ dragging=false; }
 function catchNear(x,y){
@@ -325,87 +324,39 @@ function catchNear(x,y){
   }
 }
 
-// --- 自己交差でループ検出 → 内側の腐敗菌を封じる ---
-function segInt(p1,p2,p3,p4){
-  const d1x=p2.x-p1.x,d1y=p2.y-p1.y, d2x=p4.x-p3.x,d2y=p4.y-p3.y;
-  const den=d1x*d2y-d1y*d2x; if(Math.abs(den)<1e-6) return null;
-  const t=((p3.x-p1.x)*d2y-(p3.y-p1.y)*d2x)/den;
-  const u=((p3.x-p1.x)*d1y-(p3.y-p1.y)*d1x)/den;
-  if(t>=0&&t<=1&&u>=0&&u<=1) return {x:p1.x+d1x*t, y:p1.y+d1y*t};
-  return null;
-}
-function pointInPoly(px,py,poly){
-  let inside=false;
-  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-    const xi=poly[i].x,yi=poly[i].y, xj=poly[j].x,yj=poly[j].y;
-    if(((yi>py)!==(yj>py)) && (px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
-  }
-  return inside;
-}
-// ★輪の成立は「自己交差」だけに頼らない。疾走しながら囲むと世界が流れるため
-//   軌跡は螺旋になり、厳密な交差はまず起きない（実測：一度も閉じなかった）。
-//   通ってきた線の近くまで戻ってきたら閉じる、という緩い判定を足す。
-const CLOSE_R=38;
-function checkClose(){
-  const n=path.length; if(n<8) return;
-  const a=path[n-2], b=path[n-1];      // 最新セグメント
-  // 近づいたら閉じる（古い点＝大きく囲めた方を優先）
-  for(let i=0;i<n-8;i++){
-    if(Math.hypot(b.x-path[i].x, b.y-path[i].y)<CLOSE_R){
-      const poly=[]; for(let k=i;k<n;k++) poly.push(path[k]);
-      if(polyArea(poly)<1400) break;
-      doSeal(poly);
-      path=[{x:b.x,y:b.y,t:clock}];
-      sealCooldown=0.2;
-      return;
-    }
-  }
-  for(let i=0;i<n-3;i++){
-    const c=path[i], d=path[i+1];
-    const X=segInt(a,b,c,d);
-    if(X){
-      // ループ多角形 = 交点 + path[i+1..n-1]
-      const poly=[X]; for(let k=i+1;k<n;k++) poly.push(path[k]);
-      const area=polyArea(poly);
-      if(area<1400){ return; } // 小さすぎる自己交差は無視（ぶれ）
-      doSeal(poly);
-      // 使ったループぶんを刈る（残りは交点以降＝新たに囲い直せる）
-      path=[{x:X.x,y:X.y,t:clock},{x:b.x,y:b.y,t:clock}];
-      sealCooldown=0.18;
-      return;
-    }
-  }
-}
-function polyArea(poly){
-  let s=0; for(let i=0,j=poly.length-1;i<poly.length;j=i++){ s+=(poly[j].x+poly[i].x)*(poly[j].y-poly[i].y); }
-  return Math.abs(s/2);
-}
-function doSeal(poly){
-  // ★囲った内側は全部溶ける。容量制も消耗も入れない ─ その場で結果が出ることが
-  //   このゲームの分かりやすさの核だった（後から足した仕組みは全て遅延型で、
-  //   「今の操作が正しかったのか」がその場で分からなくなっていた）
-  let sealed=0;
+// ★「つなぐ」こと自体を報酬にする。
+//   前2作（擦る→その場で糖になる／ちぎる→その場で増える）は1動作＝1ご褒美だった。
+//   囲む方式は「集める→回り込む→閉じる」の3段階を踏まないと報酬が出ず、
+//   動詞が"準備"になっていた。ここでは繋いだ瞬間から酸が効く。
+const AURA_BASE=24, AURA_PER=2.2, AURA_MAX=92;
+function auraR(){ return Math.min(AURA_MAX, AURA_BASE+AURA_PER*joinedCount); }
+
+function acidSweep(){
+  if(!dragging && joinedCount===0) return;
+  const R=auraR();
+  const chain=rods.filter(r=>r.joined);
   for(const f of foes){
     if(f.dead) continue;
-    if(pointInPoly(f.x,f.y,poly)){
-      f.dead=true; f.dt=0; sealed++;
-      for(let i=0;i<12;i++) bits.push({x:f.x,y:f.y, vx:rnd(-1.3,1.3),vy:rnd(-1.7,0.4), life:1, r:rnd(1.5,3.6)});
+    let hit = dragging && Math.hypot(f.x-head.x, f.y-head.y) < R+f.r*0.6;
+    if(!hit){
+      for(const r of chain){
+        if(Math.hypot(f.x-r.x, f.y-r.y) < R+f.r*0.6){ hit=true; break; }
+      }
     }
-  }
-  seals.push({poly, life:1, strong:joinedCount, partial:false});
-  if(sealed>0){
-    totalSealed+=sealed;
-    if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
-    updateHud();
-    fizz(sealed, joinedCount);
-    for(let i=0;i<sealed;i++) setTimeout(spawnFoe, 600+i*130);
-    if(sealed>=3) tipMsg(sealed+'匹まとめて溶かした！');
-  }else{
-    fizz(0, joinedCount);
+    if(hit) melt(f);
   }
 }
-function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
-function updateHud(){ elCnt.textContent=totalSealed; elBest.textContent= best? 'これまで最多 '+best : ''; }
+function melt(f){
+  f.dead=true; f.dt=0;
+  totalSealed++;
+  if(totalSealed>best){ best=totalSealed; localStorage.setItem('sweepBest',best); }
+  for(let i=0;i<12;i++) bits.push({x:f.x,y:f.y, vx:rnd(-1.4,1.4),vy:rnd(-1.8,0.4), life:1, r:rnd(1.5,3.6)});
+  meltSnd(totalSealed);
+  setTimeout(spawnFoe, 700+Math.random()*600);
+  updateHud();
+}
+
+function updateHud(){ elCnt.textContent=totalSealed; elBest.textContent=(best? 'これまで最多 '+best+' ／ ':'')+'酸の範囲 '+Math.round(auraR())+'px'; }
 
 // --- 鎖が腐敗菌に触れたら四散（両側リスク）---
 // ★当たりの範囲を選べる。既定は「指先だけが危険」。
@@ -551,6 +502,21 @@ function resistSnd(n){ if(!A)return; try{
   o.connect(lp).connect(og).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
 }catch(e){} }
 
+function meltSnd(n){ if(!A)return; try{
+  const t=A.currentTime, dur=0.2;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate), ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const bp=A.createBiquadFilter(); bp.type='bandpass';
+  bp.frequency.setValueAtTime(2200,t); bp.frequency.exponentialRampToValueAtTime(700,t+dur); bp.Q.value=1.1;
+  const gg=A.createGain(); gg.gain.setValueAtTime(0.20,t); gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+  const o=A.createOscillator(), og=A.createGain();
+  o.type='triangle'; o.frequency.setValueAtTime(520+Math.min(n,30)*11,t);
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.10,t+0.012);
+  og.gain.exponentialRampToValueAtTime(0.0001,t+0.22);
+  o.connect(og).connect(A.destination); o.start(t); o.stop(t+0.24);
+}catch(e){} }
 function breakSnd(n){ if(!A)return; try{
   const t=A.currentTime, dur=0.22;
   // ザッと砕ける低め破裂ノイズ
@@ -734,7 +700,7 @@ function loop(ts){
     //   引き直す。これが無いと先頭だけ世界に取り残されて画面外へ消える
     moveTo(Math.max(6, Math.min(worldW()-6, finger.x/zoom+cam.x)),
            Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y/zoom+cam.y)));
-    trimTrail(); checkHit();
+    trimTrail(); acidSweep();
   }
 
 
@@ -758,25 +724,6 @@ function loop(ts){
     drawFoe(f,warn); }
   foes=foes.filter(f=>!(f.dead&&f.dt>0.5));
 
-  // 封印フラッシュ
-  for(const s of seals){
-    s.life-=dt*2.2;
-    if(s.life>0){
-      g.beginPath(); g.moveTo(s.poly[0].x,s.poly[0].y);
-      for(let i=1;i<s.poly.length;i++) g.lineTo(s.poly[i].x,s.poly[i].y); g.closePath();
-      // 容量不足の封印は琥珀色＝「足りなかった」が一目で分かる
-      if(s.partial){
-        g.fillStyle='rgba(245,200,120,'+(0.26*s.life)+')';
-        g.strokeStyle='rgba(255,215,140,'+(0.7*s.life)+')';
-      }else{
-        g.fillStyle='rgba(150,245,205,'+(0.30*s.life)+')';
-        g.strokeStyle='rgba(180,255,220,'+(0.7*s.life)+')';
-      }
-      g.lineWidth=3; g.fill(); g.stroke();
-    }
-  }
-  seals=seals.filter(s=>s.life>0);
-
   // 溶けカス
   for(const b of bits){ b.x+=b.vx; b.y+=b.vy; b.vy+=0.06; b.life-=dt*1.6;
     if(b.life>0){ g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7); g.fillStyle='rgba(160,245,200,'+(0.7*b.life)+')'; g.fill(); } }
@@ -785,6 +732,26 @@ function loop(ts){
   // 鎖の目標（順序のみ。位置は下でバネ計算する）
   const joined=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
   const headAdv=dragging? Math.hypot(head.x-prevHead.x, head.y-prevHead.y) : 0;
+
+  // ★酸のオーラ。繋いだ数だけ広がるのが一目で分かる
+  if(dragging || joinedCount>0){
+    const R=auraR();
+    const pts=rods.filter(r=>r.joined).map(r=>({x:r.x,y:r.y}));
+    if(dragging) pts.push({x:head.x,y:head.y});
+    g.save(); g.globalCompositeOperation='lighter';
+    for(const p of pts){
+      const gr=g.createRadialGradient(p.x,p.y,0,p.x,p.y,R);
+      gr.addColorStop(0,'rgba(120,240,195,0.15)');
+      gr.addColorStop(0.6,'rgba(120,240,195,0.06)');
+      gr.addColorStop(1,'rgba(120,240,195,0)');
+      g.fillStyle=gr; g.beginPath(); g.arc(p.x,p.y,R,0,7); g.fill();
+    }
+    g.restore();
+    if(dragging){
+      g.beginPath(); g.arc(head.x,head.y,R,0,7);
+      g.strokeStyle='rgba(150,245,205,.22)'; g.lineWidth=1.5; g.stroke();
+    }
+  }
 
   // 現在のなぞり線（酸の帯）＝古い所ほど薄く細く＝蒸発しかけ
   if(dragging && path.length>1){
