@@ -94,25 +94,44 @@ function clampCam(){
   cam.x=Math.max(0,Math.min(camMaxX(),cam.x));
   cam.y=Math.max(0,Math.min(camMaxY(),cam.y));
 }
-// ★カメラ＝「画面の端に押し付けるほど速く流れる」明示的な操作。
-//   以前は進行方向を先読みしていたが、これは暴走ループを作っていた：
-//   指の世界座標 = 画面の指の位置 + カメラ位置 なので、カメラが前に出ると
-//   指を止めていても先頭が世界を進み、それが速度と判定されて先読みが伸び、
-//   カメラがさらに前に出る…と加速し続けて制御できなくなっていた。
-//   この方式なら指を止めれば必ず止まり、先頭は常に指の真下に居る。
-let finger={x:0,y:0};                      // 画面座標での指の位置
-const CAM_DEAD_X=0.22, CAM_DEAD_Y=0.20;    // 中央のこの割合の内側では流れない
-const PAN_MAX=520;                         // 端まで押し付けた時の流れる速さ(px/秒)
+// ★カメラは「指の画面上の速度」だけで決める。
+//   ここが要点：先頭の世界速度から決めると、カメラが動く→先頭が進む→
+//   速度が上がったと判定→カメラがもっと動く…と暴走する（前回の失敗）。
+//   指の画面速度はプレイヤーの意図そのもので、カメラの動きが混ざらない。
+//   ・速く払うほど世界が流れる＝疾走（画面端まで行く必要が無い）
+//   ・指を止めれば流れも止まる
+//   ・端に押し付けた時は、止まったままでも流し続けられる（追加分）
+let finger={x:0,y:0}, prevFinger={x:0,y:0}, fingerVel={x:0,y:0};
+const FLOW_K=0.62;        // 指の速度のうち、どれだけ世界を流すか
+const FLOW_MIN=230;       // これ以下の速さでは流れない。輪を描く操作(毎秒150〜200px程度)で
+                          // 流れてしまうと形が崩れるので、疾走と明確に分ける
+const CAM_DEAD_X=0.22, CAM_DEAD_Y=0.20;
+const PAN_MAX=520;        // 端に押し付けた時の追加分(px/秒)
+const PAN_CAP=900;        // 流れる速さの上限(px/秒)
 function followCam(dt){
-  if(!dragging) return;
-  const mx=W*CAM_DEAD_X, my=H*CAM_DEAD_Y;
+  if(!dragging){ fingerVel.x=0; fingerVel.y=0; prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
+  const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
+  prevFinger.x=finger.x; prevFinger.y=finger.y;
+  const sm=Math.min(1,dt*14);
+  fingerVel.x+=(vx-fingerVel.x)*sm; fingerVel.y+=(vy-fingerVel.y)*sm;
+
+  let cx=0, cy=0;
+  const sp=Math.hypot(fingerVel.x,fingerVel.y);
+  if(sp>FLOW_MIN){                    // 速く払った分だけ流す
+    const g=(sp-FLOW_MIN)/sp*FLOW_K;
+    cx+=fingerVel.x*g; cy+=fingerVel.y*g;
+  }
+  const mx=W*CAM_DEAD_X, my=H*CAM_DEAD_Y;   // 端に押し付けた分（止めたままでも流せる）
   let ox=0, oy=0;
   if(finger.x<mx) ox=(finger.x-mx)/mx; else if(finger.x>W-mx) ox=(finger.x-(W-mx))/mx;
   if(finger.y<my) oy=(finger.y-my)/my; else if(finger.y>H-my) oy=(finger.y-(H-my))/my;
   ox=Math.max(-1,Math.min(1,ox)); oy=Math.max(-1,Math.min(1,oy));
-  const ease=v=>(v<0?-1:1)*v*v;            // 端に近いほど加速（手前は細かく効く）
-  cam.x+=ease(ox)*PAN_MAX*dt;
-  cam.y+=ease(oy)*PAN_MAX*dt;
+  const ease=v=>(v<0?-1:1)*v*v;
+  cx+=ease(ox)*PAN_MAX; cy+=ease(oy)*PAN_MAX;
+
+  const tot=Math.hypot(cx,cy);
+  if(tot>PAN_CAP){ cx=cx/tot*PAN_CAP; cy=cy/tot*PAN_CAP; }
+  cam.x+=cx*dt; cam.y+=cy*dt;
   clampCam();
 }
 function inView(x,y,m){ m=m||60;
@@ -290,11 +309,22 @@ function foeDist(px,py,f){
   t=Math.max(0,Math.min(1,t));
   return Math.hypot(px-(ax+dx*t), py-(ay+dy*t))-Wd;
 }
+// ★1フレームの移動線分に沿って判定する。点だけで見ると、疾走中（1フレームに
+//   40px以上進む）に敵を飛び越してしまう＝当たらない/当たりが運任せになる
+function sweptHit(ax,ay,bx,by,f,HIT){
+  const d=Math.hypot(bx-ax,by-ay);
+  const n=Math.max(1, Math.ceil(d/6));
+  for(let i=0;i<=n;i++){
+    const t=i/n;
+    if(foeDist(ax+(bx-ax)*t, ay+(by-ay)*t, f) < HIT) return true;
+  }
+  return false;
+}
 function checkHit(){
   if(hitCd>0) return;
   const HIT=RW/2+4;
   for(const f of foes){ if(f.dead) continue;
-    if(foeDist(head.x,head.y,f) < HIT){ shatter(f.x,f.y); return; } }
+    if(sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,HIT)){ shatter(f.x,f.y); return; } }
   if(HIT_MODE==='all'){
     for(const r of rods){ if(!r.joined) continue;
       for(const f of foes){ if(f.dead) continue;
