@@ -94,34 +94,25 @@ function clampCam(){
   cam.x=Math.max(0,Math.min(camMaxX(),cam.x));
   cam.y=Math.max(0,Math.min(camMaxY(),cam.y));
 }
-// ★カメラ。ゆっくり動く時は安定（小さな輪が描ける）、速く走る時は先を見せる。
-//   デッドゾーンが広い＋追従が遅いと「走ると先が見えない」ので指を緩めてしまう
-let headVel={x:0,y:0};
-const CAM_DEAD_X=0.17, CAM_DEAD_Y=0.15;   // 中央のこの割合を出たらカメラが動く
-const CAM_K=13;                            // 追従の速さ
-const LEAD_T=0.30;                         // 進行方向の先読み（秒）
-// 先読みの上限は軸ごとに（縦画面は縦に長いので縦を大きく取らないと先が浅い）
-function leadMaxX(){ return W*0.38; }
-function leadMaxY(){ return H*0.30; }
+// ★カメラ＝「画面の端に押し付けるほど速く流れる」明示的な操作。
+//   以前は進行方向を先読みしていたが、これは暴走ループを作っていた：
+//   指の世界座標 = 画面の指の位置 + カメラ位置 なので、カメラが前に出ると
+//   指を止めていても先頭が世界を進み、それが速度と判定されて先読みが伸び、
+//   カメラがさらに前に出る…と加速し続けて制御できなくなっていた。
+//   この方式なら指を止めれば必ず止まり、先頭は常に指の真下に居る。
+let finger={x:0,y:0};                      // 画面座標での指の位置
+const CAM_DEAD_X=0.22, CAM_DEAD_Y=0.20;    // 中央のこの割合の内側では流れない
+const PAN_MAX=520;                         // 端まで押し付けた時の流れる速さ(px/秒)
 function followCam(dt){
   if(!dragging) return;
-  const vx=(head.x-prevHead.x)/Math.max(0.001,dt), vy=(head.y-prevHead.y)/Math.max(0.001,dt);
-  const sm=Math.min(1,dt*9);
-  headVel.x+=(vx-headVel.x)*sm; headVel.y+=(vy-headVel.y)*sm;
-  // 速いほど大きく先読みする（遅い時は0＝小さな操作でカメラが揺れない）
-  const sp=Math.hypot(headVel.x,headVel.y);
-  const lead=Math.min(1, Math.max(0, (sp-120)/700));
-  let lx=headVel.x*LEAD_T*lead, ly=headVel.y*LEAD_T*lead;
-  lx=Math.max(-leadMaxX(), Math.min(leadMaxX(), lx));
-  ly=Math.max(-leadMaxY(), Math.min(leadMaxY(), ly));
-  const ax=head.x+lx, ay=head.y+ly;
   const mx=W*CAM_DEAD_X, my=H*CAM_DEAD_Y;
-  const sx=ax-cam.x, sy=ay-cam.y;
-  let tx=cam.x, ty=cam.y;
-  if(sx<mx) tx=ax-mx; else if(sx>W-mx) tx=ax-(W-mx);
-  if(sy<my) ty=ay-my; else if(sy>H-my) ty=ay-(H-my);
-  const k=Math.min(1,dt*CAM_K);
-  cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k;
+  let ox=0, oy=0;
+  if(finger.x<mx) ox=(finger.x-mx)/mx; else if(finger.x>W-mx) ox=(finger.x-(W-mx))/mx;
+  if(finger.y<my) oy=(finger.y-my)/my; else if(finger.y>H-my) oy=(finger.y-(H-my))/my;
+  ox=Math.max(-1,Math.min(1,ox)); oy=Math.max(-1,Math.min(1,oy));
+  const ease=v=>(v<0?-1:1)*v*v;            // 端に近いほど加速（手前は細かく効く）
+  cam.x+=ease(ox)*PAN_MAX*dt;
+  cam.y+=ease(oy)*PAN_MAX*dt;
   clampCam();
 }
 function inView(x,y,m){ m=m||60;
@@ -179,7 +170,8 @@ let clock=0;   // 経過秒。軌跡の各点の生成時刻に使う
 // 画面座標 → 世界座標（カメラ分を足す）。世界の外へは出られないよう挟む。
 // 挟まないと、世界の端でカメラが止まった後も先頭だけが外へ走り、画面外に置き去りになる
 function pos(e){const r=cv.getBoundingClientRect();
-  const x=e.clientX-r.left+cam.x, y=e.clientY-r.top+cam.y;
+  finger.x=e.clientX-r.left; finger.y=e.clientY-r.top;   // カメラの流れに使う
+  const x=finger.x+cam.x, y=finger.y+cam.y;
   return{ x:Math.max(6, Math.min(worldW()-6, x)),
           y:Math.max(PLAY_TOP-6, Math.min(worldBot()+6, y)) };}
 
@@ -199,7 +191,7 @@ function moveTo(x,y){
   head={x,y}; catchNear(x,y);
   if(sealCooldown<=0) checkClose();
 }
-function end(){ dragging=false; headVel.x=0; headVel.y=0; }
+function end(){ dragging=false; }
 function catchNear(x,y){
   for(const r of rods){
     if(r.joined) continue;
@@ -590,9 +582,15 @@ function loop(ts){
   clock+=dt;
   if(sealCooldown>0) sealCooldown-=dt;
   if(hitCd>0) hitCd-=dt;
-  if(dragging){ trimTrail(); checkHit(); }
-
   followCam(dt);
+  if(dragging){
+    // ★指を止めたままでもカメラは流れる。先頭は毎フレーム「指の画面位置＋カメラ」で
+    //   引き直す。これが無いと先頭だけ世界に取り残されて画面外へ消える
+    moveTo(Math.max(6, Math.min(worldW()-6, finger.x+cam.x)),
+           Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y+cam.y)));
+    trimTrail(); checkHit();
+  }
+
 
   g.save();
   if(shake>0.2){ const s=shake; g.translate(rnd(-s,s),rnd(-s,s)); shake*=0.86; } else shake=0;
