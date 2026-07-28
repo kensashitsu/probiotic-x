@@ -50,7 +50,7 @@
   <div class="small">なぞると培地が温まります。<br>至適温度になると菌がくびれます。<br>光ったら、その上をなぞって切る。</div></div>
 <div id="ver">-</div>
 <script>
-const BUILD='v29 (07-28 14:34)';
+const BUILD='v30 (07-28 14:42)';
 document.getElementById('ver').textContent=BUILD;
 
 /* ─────────── 設定（?param= で調整可能） ─────────── */
@@ -106,11 +106,15 @@ function splitSnd(n){ const f=520*Math.pow(1.0595,Math.min(24,n)); beep(f,.14,'t
 function sugarSnd(){ beep(880,.08,'sine',.09,1.5); beep(1320,.07,'sine',.05,1.4); }
 function deadSnd(){ beep(150,.3,'sawtooth',.12,.4); }
 function readySnd(){ beep(1180,.05,'sine',.045,1.05); }
+function wakeSnd(){ beep(392,.16,'sine',.07,2.0); beep(784,.22,'sine',.045,1.5); }   // 目覚める
+function sleepSnd(){ beep(330,.22,'sine',.05,.62); }                                 // 静まる
+function fizzSnd(a){ beep(rnd(1500,2600),.045,'sine',.012+.016*a,1.25); }             // しゅわ
 
 /* ─────────── 状態 ─────────── */
 let temp=T_AMB, glucose=G_START, clock=0, over=false, started=false;
 let colonies=[], sugars=[], bits=[], acid=0, splits=0, combo=0, comboT=0;
 let heatFlash=0;
+let act=0, drops=[], dropAcc=0, fizzT=0;   // act=活性度（至適で1）／drops=放出された乳酸
 
 function rnd(a,b){ return a+Math.random()*(b-a); }
 
@@ -177,6 +181,7 @@ function grow(c){
 function reset(){
   temp=T_AMB; glucose=G_START; clock=0; over=false; started=false;
   colonies=[]; sugars=[]; bits=[]; acid=0; splits=0; combo=0; comboT=0;
+  act=0; drops=[]; dropAcc=0; fizzT=0;
   for(let i=0;i<COLONIES;i++) colonies.push(newColony());
   for(let i=0;i<SUGAR_N;i++) sugars.push(newSugar());
   document.getElementById('msg').classList.remove('hide');
@@ -264,12 +269,44 @@ function matRate(){
   const g=Math.exp(-Math.pow((temp-T_OPT)/7,2));
   return (temp>T_DEAD?0:MAT_K*g);
 }
+/* 活性度：至適41℃で1、帯を外れると0 */
+function actTarget(){
+  if(temp>T_DEAD) return 0;
+  const g=Math.exp(-Math.pow((temp-T_OPT)/7,2));
+  return Math.max(0,Math.min(1,(g-0.35)/0.65));
+}
 function update(dt){
   clock+=dt;
   if(over) return;
   temp -= (temp-T_AMB)*COOL_K*dt;
   if(temp<T_AMB) temp=T_AMB;
   heatFlash=Math.max(0,heatFlash-dt*2);
+
+  // ── 活性化と乳酸の放出 ──
+  const a0=act;
+  act += (actTarget()-act)*Math.min(1,dt*5);
+  if(a0<0.18&&act>=0.18) wakeSnd();          // 目を覚ます
+  if(a0>=0.18&&act<0.18) sleepSnd();         // おとなしくなる
+  if(started&&act>0.05){
+    const n=totalCells();
+    acid += act*n*0.004*dt;                   // 活性中はじわじわ酸性に
+    dropAcc += act*n*1.7*dt;
+    while(dropAcc>=1&&drops.length<260){
+      dropAcc-=1;
+      const c=colonies[(Math.random()*colonies.length)|0];
+      const p=c.cells[(Math.random()*c.cells.length)|0];
+      const an=rnd(0,6.284), sp=rnd(14,42)*S;
+      drops.push({x:p.x,y:p.y,vx:Math.cos(an)*sp,vy:Math.sin(an)*sp,
+        t:0,life:rnd(.9,1.7),r:rnd(1.2,2.6)*S});
+    }
+    if(dropAcc>1) dropAcc=1;
+    fizzT-=dt;
+    if(fizzT<=0){ fizzT=rnd(.20,.42)/Math.max(.25,act); fizzSnd(act); }
+  }
+  for(let i=drops.length-1;i>=0;i--){
+    const d=drops[i]; d.t+=dt; d.x+=d.vx*dt; d.y+=d.vy*dt; d.vx*=.965; d.vy*=.965;
+    if(d.t>d.life) drops.splice(i,1);
+  }
 
   if(started){
     glucose -= (G_BASE + Math.max(0,temp-T_AMB)*G_HEAT)*dt;
@@ -319,6 +356,7 @@ function updGauges(){
   const bar=document.getElementById('tmark').parentElement;
   const w=bar.clientWidth||1;
   const p=v=>Math.max(0,Math.min(1,(v-T_AMB)/(T_MAX-T_AMB)));
+  document.getElementById('tband').style.background='rgba(120,240,180,'+(0.16+0.42*act)+')';
   document.getElementById('tband').style.left=(p(T_LO)*100)+'%';
   document.getElementById('tband').style.width=((p(T_HI)-p(T_LO))*100)+'%';
   document.getElementById('tdead').style.left=(p(T_DEAD)*100)+'%';
@@ -354,6 +392,15 @@ function drawFace(x,y,a,r,mood,scaleX){
     ctx.moveTo(ex-r*.16, ey-r*.13); ctx.lineTo(ex+r*.16, ey+r*.13);
     ctx.moveTo(ex-r*.16, ey+r*.13); ctx.lineTo(ex+r*.16, ey-r*.13); ctx.stroke();
     ctx.beginPath(); ctx.arc(ex+r*.42,0,r*.16,0,6.284); ctx.fill();
+  }else if(mood==='happy'){          // 活性化：にっこり
+    ctx.lineWidth=Math.max(1,r*.15); ctx.strokeStyle='#0d1a16'; ctx.lineCap='round';
+    for(const s of [-1,1]){                       // ^ ^ の目（前方が山）
+      ctx.beginPath();
+      ctx.moveTo(ex+r*.12, s*ey-r*.18);
+      ctx.lineTo(ex-r*.14, s*ey);
+      ctx.lineTo(ex+r*.12, s*ey+r*.18); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(r*.40,0,r*.26,-1.05,1.05); ctx.stroke();
   }else if(mood==='hurt'){
     ctx.lineWidth=Math.max(1,r*.15); ctx.strokeStyle='#0d1a16'; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(ex-r*.15,-ey); ctx.lineTo(ex+r*.15,-ey);
@@ -375,16 +422,30 @@ function capsule(x,y,a,len,rad){
 }
 function drawColony(c){
   const rad=cellRad(c), len=cellLen(c);
-  const sway=(i)=>Math.sin(clock*1.6+c.phase+i*0.7)*1.2*S;
-  // つながり線
-  ctx.strokeStyle=c.type==='rod'?'rgba(120,200,230,.30)':'rgba(120,240,190,.30)';
-  ctx.lineWidth=rad*0.9; ctx.lineCap='round'; ctx.beginPath();
+  // 活性中はゆらぎが大きくなる（呼吸するように動く）
+  const sway=(i)=>Math.sin(clock*(1.6+2.2*act)+c.phase+i*0.7)*(1.2+1.5*act)*S;
+  const pts=[];
   for(let i=0;i<c.cells.length;i++){
     const p=c.cells[i], nx=Math.cos(p.a+Math.PI/2), ny=Math.sin(p.a+Math.PI/2);
-    const x=p.x+nx*sway(i), y=p.y+ny*sway(i);
-    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    pts.push({x:p.x+nx*sway(i), y:p.y+ny*sway(i)});
   }
-  ctx.stroke();
+  const trace=()=>{ ctx.beginPath();
+    for(let i=0;i<pts.length;i++){ i?ctx.lineTo(pts[i].x,pts[i].y):ctx.moveTo(pts[i].x,pts[i].y); } };
+
+  // 活性化：鎖のまわりに乳酸のもやが立つ
+  if(act>0.04){
+    const pu=0.55+0.45*Math.sin(clock*3.1+c.phase);
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    ctx.strokeStyle='rgba(150,255,205,'+(0.035+0.075*act*pu)+')';
+    ctx.lineWidth=rad*(3.0+1.6*act); ctx.lineCap='round'; ctx.lineJoin='round';
+    trace(); ctx.stroke();
+    ctx.strokeStyle='rgba(190,255,225,'+(0.03+0.06*act)+')';
+    ctx.lineWidth=rad*(1.7+0.8*act); trace(); ctx.stroke();
+    ctx.restore();
+  }
+  // つながり線
+  ctx.strokeStyle=c.type==='rod'?'rgba(120,200,230,.30)':'rgba(120,240,190,.30)';
+  ctx.lineWidth=rad*0.9; ctx.lineCap='round'; trace(); ctx.stroke();
 
   for(let i=0;i<c.cells.length;i++){
     const p=c.cells[i], last=(i===c.cells.length-1);
@@ -395,9 +456,11 @@ function drawColony(c){
       L=len*(1+0.55*c.mat);                       // くびれて伸びる
       if(c.ready) mood='ready';
     }
+    if(mood==='normal'&&act>0.40) mood='happy';
     if(c.hurt>0&&last) mood='hurt';
     const grown=p.born!==undefined?Math.min(1,(clock-p.born)*4):1;
-    const pop=1+0.35*(1-grown)*(1-grown);
+    // 活性中は脈打つ
+    const pop=(1+0.35*(1-grown)*(1-grown))*(1+0.09*act*Math.sin(clock*5.5+c.phase+i*0.55));
 
     if(c.ready&&last){
       const pu=0.5+0.5*Math.sin(clock*9);
@@ -459,6 +522,22 @@ function draw(){
     ctx.closePath(); ctx.fill();
   }
 
+  // 放出された乳酸
+  if(drops.length){
+    ctx.save(); ctx.globalCompositeOperation='lighter';
+    for(const d of drops){
+      const k=d.t/d.life, al=Math.sin(Math.min(1,k*3.2)*1.57)*(1-k*k)*0.85;
+      const R=d.r*(1+k*1.8);
+      const g=ctx.createRadialGradient(d.x,d.y,0,d.x,d.y,R*3.2);
+      g.addColorStop(0,'rgba(170,255,215,'+(0.42*al)+')');
+      g.addColorStop(1,'rgba(120,230,190,0)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(d.x,d.y,R*3.2,0,6.284); ctx.fill();
+      ctx.fillStyle='rgba(220,255,240,'+(0.55*al)+')';
+      ctx.beginPath(); ctx.arc(d.x,d.y,R*0.62,0,6.284); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   for(const c of colonies) drawColony(c);
 
   for(const b of bits){
@@ -475,6 +554,10 @@ function draw(){
     ctx.fillStyle='rgba(150,190,210,.55)';
     ctx.font='700 '+(13*S)+'px system-ui'; ctx.textAlign='center';
     ctx.fillText('冷たい：もっと擦って温める', W/2, f.y0+22*S);
+  }else if(act>0.35&&!over){
+    ctx.fillStyle='rgba(143,240,192,'+(0.35+0.35*act*(0.6+0.4*Math.sin(clock*3.4)))+')';
+    ctx.font='700 '+(13*S)+'px system-ui'; ctx.textAlign='center';
+    ctx.fillText('活性化！乳酸を放出中', W/2, f.y0+22*S);
   }
   if(combo>=3&&!over){
     ctx.fillStyle='rgba(143,240,192,.85)'; ctx.textAlign='center';
