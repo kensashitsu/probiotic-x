@@ -37,7 +37,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v32 (07-28 16:05)';
+const BUILD='v33 (07-28 16:47)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt'), elBest=document.getElementById('best');
@@ -47,6 +47,8 @@ function resize(){
   W=cv.clientWidth; H=cv.clientHeight;
   cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
   g.setTransform(DPR,0,0,DPR,0,0);
+  // iOSはURLバーの出入りで高さが変わる。世界の外にカメラが残らないよう挟み直す
+  try{ clampCam(); }catch(e){}
 }
 window.addEventListener('resize',resize);
 
@@ -142,7 +144,7 @@ let turnRate=0, straight=1, strokeT0=-9;
 //   走れて、進行方向に画面の半分が見える。ソニックの「加速して惰性で走る」に対応。
 let camVel={x:0,y:0};
 const ACC_UP=7;     // 加速の速さ
-const ACC_COAST=1.1;// 指を戻した後の惰性（小さいほど長く流れ続ける）
+const ACC_COAST=+(_q.get('coast')||0.8);// 指を戻した後の惰性（小さいほど長く流れ続ける）
 const ACC_BRAKE=14; // 曲がった時の制動（囲みのために素早く止める）
 let dirRef={x:0,y:0,ang:null,t:0};   // 旋回を測る基準点（指の実移動から求める）
 const TURN_LO=2.0, TURN_HI=6.0;      // 旋回の速さ(rad/秒)。これ以上でスクロールを止める
@@ -173,6 +175,7 @@ const CAM_DEAD=0.06;      // 中央のごく狭い不感帯（ここだけは流
 // ★端まで行った時の速さは「指で払う速さ」より速くないと、端に着いた瞬間に
 //   減速して壁にぶつかったように感じる（＝走りを阻害される）。
 //   立ち上がりも二次カーブだと手前が効かないので直線にする
+const EDGE_GUARD=Math.max(0, Math.min(.45, +(_q.get('guard')||0.22)));  // 端の何割を触らずに済ませるか
 const PAN_MAX=1300;       // 端まで押し付けた時の速さ(px/秒)
 const PAN_CAP=1600;       // 流れる速さの上限(px/秒)
 function followCam(dt){
@@ -210,10 +213,14 @@ function followCam(dt){
   //   直線だと中央から93px押し出さないと毎秒600pxが出ず、走り出しの間ずっと
   //   指が端寄りになる＝指先より先の余白が狭い＝「先が見えない」。
   //   少し押しただけで速度が乗れば、指を中央近くに保ったまま走れる。
+  // ★阻害要素②：以前は画面のちょうど端で最高速だった。iPhoneは下端がホーム、
+  //   上端が通知のジェスチャ帯なので、最高速を出すには指をOSに奪われる場所まで
+  //   運ばされていた（touchcancel＝鎖が消える）。端より手前(78%)で最高速に達するようにする。
+  //   副作用として指先の前に余白が残るので「先が見えない」も同時に軽くなる
   const shape=v=>{
     const a=Math.abs(v);
     if(a<CAM_DEAD) return 0;
-    const t=Math.min(1,(a-CAM_DEAD)/(1-CAM_DEAD));
+    const t=Math.min(1,(a-CAM_DEAD)/Math.max(0.05,1-EDGE_GUARD-CAM_DEAD));
     return (v<0?-1:1)*Math.pow(t,0.7);
   };
   cx+=shape((finger.x-W/2)/(W/2))*PAN_MAX;
@@ -249,6 +256,8 @@ const DANGER_R=95;     // 警告に気付き始める距離
 const HAND_R=64;       // この距離まで来たら手の下＝警告を最大にする
 function warnLevel(d){ return Math.max(0, Math.min(1, (DANGER_R-d)/(DANGER_R-HAND_R))); }
 
+const LOUPE_R=+(_q.get('loupeR')||135);  // 手の下にこの距離まで雑菌が来たらルーペを出す
+let loupeA=0;                            // ルーペの表示量（滑らかに出入りする）
 let rods=[];   // {x,y,ang,joined,order,phase}
 let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
 let bits=[];   // 溶けカス粒子
@@ -469,11 +478,28 @@ function shatter(ox,oy){
 cv.addEventListener('mousedown',e=>{const p=pos(e);start(p.x,p.y);});
 cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
 window.addEventListener('mouseup',end);
-cv.addEventListener('touchstart',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);start(p.x,p.y);},{passive:false});
-cv.addEventListener('touchmove',e=>{e.preventDefault();const p=pos(e.changedTouches[0]);moveTo(p.x,p.y);},{passive:false});
-cv.addEventListener('touchend',e=>{e.preventDefault();end();},{passive:false});
+// ★阻害要素①：最初の指だけを操作に使う。
+//   以前は touchstart ごとに start() が走り、start() は全ての桿菌を切り離すので、
+//   手のひらや親指が画面をかすっただけで鎖が丸ごと消えていた（実機で頻発する事故）。
+//   識別子で操作中の指を固定すれば、他の接触は完全に無視される。
+let activeId=null;
+function findTouch(list,id){ for(let i=0;i<list.length;i++) if(list[i].identifier===id) return list[i]; return null; }
+cv.addEventListener('touchstart',e=>{e.preventDefault();
+  if(activeId!==null) return;                 // 2本目以降は無視
+  const t=e.changedTouches[0]; activeId=t.identifier;
+  const p=pos(t); start(p.x,p.y);},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();
+  const t=findTouch(e.changedTouches,activeId); if(!t) return;
+  const p=pos(t); moveTo(p.x,p.y);},{passive:false});
+function touchOff(e){ e.preventDefault();
+  if(activeId===null) return;
+  if(!findTouch(e.changedTouches,activeId)) return;   // 他の指が離れただけ
+  activeId=null; end(); }
+cv.addEventListener('touchend',touchOff,{passive:false});
 // 指が画面外に出た/システムジェスチャで奪われた時に握ったままにならないよう保険
-cv.addEventListener('touchcancel',e=>{e.preventDefault();end();},{passive:false});
+cv.addEventListener('touchcancel',touchOff,{passive:false});
+// アプリが背面に回った時も握りを解く（戻った時に鎖が固まったままになるのを防ぐ）
+document.addEventListener('visibilitychange',()=>{ if(document.hidden){ activeId=null; end(); } });
 document.getElementById('reset').addEventListener('click',()=>{scatter();document.getElementById('tip').style.opacity=1;});
 
 // ---- 酸の帯を尾から蒸発させる ----
@@ -896,6 +922,50 @@ function loop(ts){
   }
 
   g.restore(); // 世界座標ここまで＋画面揺れ
+
+  // ★阻害要素③：手の死角。指と手のひらは半径55〜64pxを覆うので、指の真下と手前は
+  //   物理的に絶対に見えない。操作点を指からずらす案は却下されたので（違和感＋ミス増）、
+  //   "覆われている場所だけを、手が届かない画面上部に映す"。操作は一切変えない。
+  //   赤い警告リング（盤面に重ねる方式）は邪魔だと却下されたが、これは盤面の外なので干渉しない。
+  //   さらに、盤面を隠す面積を最小にするため「実際に手の下に雑菌がいる時だけ」出す。
+  //   何も無い間は消えているので、常時どこかが見えないという不満が出ない。
+  let nearFoe=1e9;
+  if(dragging) for(const f of foes){ if(f.dead) continue;
+    const d=Math.hypot(f.x-head.x,f.y-head.y); if(d<nearFoe) nearFoe=d; }
+  const wantL=(dragging && nearFoe<LOUPE_R)?1:0;
+  loupeA+=(wantL-loupeA)*Math.min(1, dt*(wantL>loupeA? 14:5));
+  if(loupeA>0.02 && _q.get('loupe')!=='0'){
+    const R=50, LX=W-13-R, LY=106+R, k=0.62;   // 世界の半径約81pxが収まる
+    g.save(); g.globalAlpha=Math.min(1,loupeA);
+    g.beginPath(); g.arc(LX,LY,R,0,7);
+    g.fillStyle='rgba(7,13,17,.90)'; g.fill();
+    g.save(); g.clip();
+    g.translate(LX,LY); g.scale(k,k); g.translate(-head.x,-head.y);
+    // 手で覆われている範囲の目印
+    g.beginPath(); g.arc(head.x,head.y,HAND_R,0,7);
+    g.fillStyle='rgba(255,255,255,.035)'; g.fill();
+    // なぞり線
+    if(path.length>1){
+      g.beginPath(); g.moveTo(path[0].x,path[0].y);
+      for(let i=1;i<path.length;i++) g.lineTo(path[i].x,path[i].y);
+      g.lineTo(head.x,head.y);
+      g.strokeStyle='rgba(140,240,200,.5)'; g.lineWidth=(RW+4)*0.7; g.lineCap='round'; g.stroke();
+    }
+    const RR=R/k+30;
+    for(const r of rods){ if(Math.abs(r.x-head.x)>RR||Math.abs(r.y-head.y)>RR) continue;
+      drawRod(r.x,r.y,r.ang,r.joined,1,false); }
+    for(const f of foes){ if(f.dead) continue;
+      if(Math.abs(f.x-head.x)>RR||Math.abs(f.y-head.y)>RR) continue;
+      drawFoe(f,0); }
+    g.beginPath(); g.arc(head.x,head.y,6,0,7);
+    g.fillStyle='rgba(210,255,235,.95)'; g.fill();
+    g.restore();
+    g.strokeStyle='rgba(140,240,200,.40)'; g.lineWidth=1.5;
+    g.beginPath(); g.arc(LX,LY,R,0,7); g.stroke();
+    g.font='700 9.5px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='alphabetic';
+    g.fillStyle='rgba(140,240,200,.55)'; g.fillText('手の下', LX, LY-R-5);
+    g.restore(); g.globalAlpha=1;
+  }
 
   // ミニマップ：広い世界のどこに何が居るかを把握するための最小限の表示
   if(WORLD>1 && _q.get('map')!=='0'){
