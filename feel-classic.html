@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v37 (07-29 06:56)';
+const BUILD='v38 (07-29 07:07)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -590,6 +590,7 @@ const HIT_MODE=(new URLSearchParams(location.search).get('hit')==='all')?'all':'
 // ★桿菌は細長いので、当たりも円ではなくカプセル（線分からの距離）で取る。
 //   円のままだと半径26pxになり「見た目では触れていないのに弾ける」が起きる
 function foeDist(px,py,f){
+  if(FOE_SHAPE==='cocci') return Math.hypot(px-f.x,py-f.y)-f.r*FOE_RD;   // 描画と同じ半径
   if(FOE_SHAPE!=='rod') return Math.hypot(px-f.x,py-f.y)-f.r*0.95;
   const sh=foeShape(f), ang=sh.ang, L=sh.L, Wd=sh.Wd;
   const ax=f.x-Math.cos(ang)*L/2, ay=f.y-Math.sin(ang)*L/2;
@@ -819,42 +820,46 @@ function foeClump(f){
   }
   return f.clump;
 }
+// 敵＝球菌。★1個体＝1個の球にする。頭数を競うゲームなので、
+//   房（5〜7個の集まり）を1匹と数えていると画面の見た目と数字が合わない。
+//   実際のブドウ球菌の"房"は、分裂した娘細胞が離れずに固まってできるものなので、
+//   1個ずつ描いても分裂で隣に増えていけば自然に房状のかたまりになる。
+const FOE_RD=0.62;                    // 描く半径＝f.r のこの倍（当たり判定と必ず揃える）
 function drawFoeCocci(f,warn){
   if(f.lunge>0) f.lunge=Math.max(0,f.lunge-0.045);
   const k=(f.dead? Math.max(0,1-f.dt*3):1)*(1+(f.lunge||0)*0.35);
   if(k>0){
     const rs=f.resist||0;
     g.save(); g.translate(f.x,f.y); g.rotate((f.ang||0)+f.phase*0.12); g.globalAlpha=k;
-    const R=f.r*0.52*k;
-    // 二分裂：ふくらむ→くびれる→房ごと2つに割れて離れる
+    const R0=f.r*FOE_RD*k;
+    // 二分裂：ふくらむ → 中央に隔壁 → 2個に割れて離れる
     const dv=f.div||0;
-    const swell=1+0.22*Math.min(1,dv/0.55);
     const t2=dv>0.55? (dv-0.55)/0.45 : 0;
-    const sep=f.r*1.30*t2;
+    const swell=1+0.20*Math.min(1,dv/0.55);
+    const sep=f.r*1.30*t2;                       // 完成時＝生成位置(±0.65*r)と一致
     const parts= t2>0? [-1,1] : [0];
+    const body= f.dead? 'rgba(160,96,70,'+k+')'
+      : (rs>0? 'rgba('+Math.round(150+90*rs)+',66,92,.96)':'rgba(168,80,118,.95)');
+    const edge= f.dead? 'rgba(200,140,120,.5)':'rgba(226,138,178,.8)';
     if(!f.dead){ g.shadowColor='rgba(190,70,120,.45)'; g.shadowBlur=7; }
     for(const sgn of parts){
-      const sc=(parts.length>1? 0.80 : swell);
-      for(const c of foeClump(f)){
-        g.beginPath(); g.arc(c.dx*k*sc, c.dy*k*sc+sgn*sep/2, R*c.s*sc, 0, 7);
-        g.fillStyle= f.dead? 'rgba(160,96,70,'+k+')'
-          : (rs>0? 'rgba('+Math.round(150+90*rs)+',66,92,.96)':'rgba(168,80,118,.95)');
-        g.strokeStyle= f.dead? 'rgba(200,140,120,.5)':'rgba(226,138,178,.75)';
-        g.lineWidth=1; g.fill(); g.stroke();
+      const R=R0*(parts.length>1? (0.80+0.20*t2) : swell);
+      const cy=sgn*sep/2;
+      g.beginPath(); g.arc(0,cy,R,0,7);
+      g.fillStyle=body; g.strokeStyle=edge; g.lineWidth=1.1; g.fill(); g.stroke();
+      if(!f.dead){                                // つやと核様体
+        g.beginPath(); g.arc(-R*0.30,cy-R*0.30,R*0.34,0,7);
+        g.fillStyle='rgba(255,215,235,.26)'; g.fill();
+        g.beginPath(); g.arc(R*0.10,cy+R*0.10,R*0.26,0,7);
+        g.fillStyle='rgba(92,36,62,.35)'; g.fill();
       }
     }
     g.shadowBlur=0;
-    if(dv>0.12&&dv<0.6){   // くびれ（隔壁）
-      const w=(dv-0.12)/0.48;
-      g.save(); g.strokeStyle='rgba(74,26,54,'+(0.30+0.40*w)+')'; g.lineWidth=Math.max(1,f.r*0.17*w);
-      g.lineCap='round';
-      g.beginPath(); g.moveTo(-f.r*0.52,0); g.lineTo(f.r*0.52,0); g.stroke(); g.restore();
-    }
-    if(!f.dead){   // 房らしいハイライト
-      for(const c of foeClump(f)){
-        g.beginPath(); g.arc(c.dx*k-R*c.s*0.3, c.dy*k-R*c.s*0.3, R*c.s*0.3, 0, 7);
-        g.fillStyle='rgba(255,215,235,.22)'; g.fill();
-      }
+    if(dv>0.12&&dv<0.6){                          // 隔壁（くびれ）
+      const w=(dv-0.12)/0.48, R=R0*swell;
+      g.save(); g.strokeStyle='rgba(74,26,54,'+(0.32+0.42*w)+')';
+      g.lineWidth=Math.max(1,R*0.30*w); g.lineCap='round';
+      g.beginPath(); g.moveTo(-R*0.82,0); g.lineTo(R*0.82,0); g.stroke(); g.restore();
     }
     g.restore(); g.globalAlpha=1;
   }
