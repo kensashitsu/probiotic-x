@@ -69,14 +69,14 @@
     <button id="reset">やり直す</button>
   </div>
 </div>
-<div id="tip">なぞって乳酸菌（桿菌）を繋ぎ 腐敗菌（ブドウ球菌）を輪で囲め ─ 囲えば溶ける／触れれば弾ける</div>
+<div id="tip">なぞって乳酸菌を繋ぐほど酸の帯が伸び、大きく囲める ─ 囲えば溶ける／触れれば弾ける</div>
 <div id="over"><div class="ttl" id="overTtl"></div><div class="sub" id="overSub"></div>
   <button id="again">もう一度</button></div>
 
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v38 (07-29 07:07)';
+const BUILD='v39 (07-29 07:36)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -122,7 +122,11 @@ const SCALE=Math.max(0.5, Math.min(2, +(_q.get('scale')||0.85)));
 const RLEN=15*SCALE, RW=6.2*SCALE;   // 桿菌の長さ・太さ
 const SPACING=(PLAYER_SHAPE==='cocci'? 10.2:15.5)*SCALE;   // 鎖の玉間隔（球菌は詰める）
 const CATCH_R=40*SCALE;              // 吸い付く射程
-const FOE_R=13*SCALE;                // 腐敗菌の半径
+// ★実際の大きさに合わせる。乳酸桿菌は約1×3.5µm、ブドウ球菌は直径約0.8〜1.0µm。
+//   つまり「球菌の直径 ≒ 桿菌の太さ」が正しい。以前は桿菌の太さの2〜3倍（ほぼ桿菌の長さ）
+//   もあって、実物よりかなり大きかった。?foer=1.6 のように倍率で見比べられる
+const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
+const FOE_R=RW*FOE_K/2;                       // 腐敗菌の半径
 
 // ★盤面の密度は画面サイズに依らず一定にする。
 //   固定数だとSE3(375x667)は390x844比で湧き範囲の面積が68%＝密度が26%上がり渋滞する
@@ -294,14 +298,25 @@ function startCount(){ return N_ABS>0? N_ABS : Math.max(12, Math.round(N_REF*pla
 function capCount(){ return Math.round(startCount()*CAP_K); }
 function rodCount(){ return startCount(); }
 function foeCount(){ return startCount(); }
-const DOOM=4.5;               // 弾け飛んだ菌の餓死までの秒数
-const DOOM_WARN=1.8;          // 残りこの秒数で点滅予告
+// ★総数が勝敗そのものになったので、四散のコストが跳ね上がった（1回ぶつかると
+//   十数匹が散り、拾い直せないと死ぬ＝人口の1割が消える）。鎖を失う罰だけで十分なので、
+//   救出の猶予を大きく取る。?doom=4.5 で以前の厳しさに戻せる
+const DOOM=+(_q.get('doom')||9);   // 弾け飛んだ菌の餓死までの秒数
+const DOOM_WARN=2.6;          // 残りこの秒数で点滅予告
 // ★酸を出した桿菌は消耗する（自家中毒）。封じた匹数だけ鎖から抜けて使用不能になり、
 //   この秒数で回復して再び拾える。-1 にすると永久死（盤面が減り続ける）
 const SPENT=0;           // 消耗なし（0で無効）
 // ★酸の帯（なぞりの軌跡）の寿命。尾から蒸発するので、大きく囲うには素早く回る必要がある。
 //   ただし鎖が団子にならないよう「鎖の長さ＋余白」は age に関係なく必ず残す
-const TRAIL_LIFE=9999;   // 蒸発させない（急かす圧は入れない）
+const TRAIL_LIFE=9999;   // 時間では消さない（急かす圧は入れない）
+// ★繋ぐメリット＝「酸を出せるのは繋がった乳酸菌だけ」。
+//   使える軌跡（酸の帯）の長さを 繋いだ数 で決める。輪の周長がそのまま上限になるので、
+//   たくさん繋ぐほど大きく囲める＝一度に多く溶かせる。
+//   容量制（囲んだ後に何匹まで溶けるか）は却下済み＝結果が閉じた後にしか分からず遅延型だった。
+//   こちらは「後ろの帯が実際に消えている」ので、囲む前から今どこまで囲めるか見えている。
+const ACID_BASE=+(_q.get('abase')||160)*SCALE;  // 素の長さ（ほぼ囲めない）
+const ACID_PER =+(_q.get('aper') ||34)*SCALE;   // 桿菌1匹あたり伸びる長さ
+function usableTrail(){ return ACID_BASE + joinedCount*ACID_PER; }
 // ★手の死角対策。指と手のひらは半径55〜64pxを覆うので、近くの腐敗菌には
 //   「手の外側まではみ出す大きさ」の警告リングを出す。操作系は変えない
 const DANGER_R=95;     // 警告に気付き始める距離
@@ -354,7 +369,7 @@ function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n;
 function livingFoes(){ let n=0; for(const f of foes) if(!f.dead) n++; return n; }
 const AM_RATE=+(_q.get('am')||0.35);   // 靄の発生（個/秒・腐敗菌が多いほど増える）
 const AM_LIFE=+(_q.get('amlife')||9);  // 靄の寿命(秒)
-const AM_R   =72*SCALE;                // 靄の半径
+const AM_R   =66*SCALE;                // 靄の半径
 let ammo=[], amAcc=0, amSeen=false, divSeen=false;
 function inAmmonia(x,y){
   for(const a of ammo){ if(a.t<a.life && Math.hypot(x-a.x,y-a.y)<a.r) return true; }
@@ -410,7 +425,7 @@ function killAllyNear(x,y,R){
 function spawnFoe(){
   const spikes=[]; const n=9;
   for(let i=0;i<n;i++) spikes.push(0.75+Math.random()*0.5);
-  foes.push({x:rnd(50,worldW()-50), y:rnd(PLAY_TOP+12,worldBot()-12), r:FOE_R*rnd(0.8,1.25), ang:Math.random()*Math.PI*2,
+  foes.push({x:rnd(50,worldW()-50), y:rnd(PLAY_TOP+12,worldBot()-12), r:FOE_R*rnd(0.88,1.14), ang:Math.random()*Math.PI*2,
              phase:Math.random()*6.28, spin:rnd(-0.5,0.5), dead:false, dt:0, spikes,
              wa:rnd(0,6.283), ws:rnd(.55,1.45)});
 }
@@ -630,7 +645,7 @@ function shatter(ox,oy){
     r.joined=false; r.order=0;
     // 衝突点から放射状に、大きくばらけて飛ばす（回収に手間をかける）
     const a=Math.atan2(r.y-oy,r.x-ox)+rnd(-1.0,1.0);
-    const sp=rnd(11,24);            // 初速アップ＝遠くまで飛ぶ
+    const sp=rnd(7,16);             // 拾い直せる範囲に散らす
     r.vx=Math.cos(a)*sp; r.vy=Math.sin(a)*sp; r.vr=rnd(-0.6,0.6);
     r.doom=DOOM;                    // 餓死タイマー開始（拾えば救出）
   }
@@ -673,16 +688,17 @@ document.getElementById('again').addEventListener('click',()=>{scatter();});
 // 古い点を先頭から捨てる。ただし鎖が追従に使う長さ分は age を無視して残す（団子防止）
 function trimTrail(){
   if(path.length<3) return;
-  // 伸びている分（r.b が ideal を超えた分）も残さないと、伸びた尻尾が軌跡の端で団子になる
+  // 鎖が乗っている分は age に関係なく必ず残す（尻尾が軌跡の端で団子になるのを防ぐ）
   let maxB=0;
   for(const r of rods) if(r.joined && r.b>maxB) maxB=r.b;
-  const need=Math.max(joinedCount*SPACING, maxB)+24;
-  let keep=0, acc=0;
+  const need=Math.max(usableTrail(), maxB+24, joinedCount*SPACING+24);
+  let acc=0, cut=0;
   for(let i=path.length-1;i>0;i--){
     acc+=Math.hypot(path[i].x-path[i-1].x, path[i].y-path[i-1].y);
-    if(acc>=need){ keep=i-1; break; }
+    if(acc>=need){ cut=i-1; break; }
   }
-  while(path.length>2 && keep>0 && (clock-path[0].t)>TRAIL_LIFE){ path.shift(); keep--; }
+  if(cut>0) path.splice(0,cut);
+  if(path.length>600) path.splice(0,path.length-600);
 }
 
 // ---- 鎖の目標位置 ----
@@ -824,7 +840,7 @@ function foeClump(f){
 //   房（5〜7個の集まり）を1匹と数えていると画面の見た目と数字が合わない。
 //   実際のブドウ球菌の"房"は、分裂した娘細胞が離れずに固まってできるものなので、
 //   1個ずつ描いても分裂で隣に増えていけば自然に房状のかたまりになる。
-const FOE_RD=0.62;                    // 描く半径＝f.r のこの倍（当たり判定と必ず揃える）
+const FOE_RD=1.0;                     // 描く半径＝f.r のこの倍（当たり判定と必ず揃える）
 function drawFoeCocci(f,warn){
   if(f.lunge>0) f.lunge=Math.max(0,f.lunge-0.045);
   const k=(f.dead? Math.max(0,1-f.dt*3):1)*(1+(f.lunge||0)*0.35);
@@ -847,11 +863,9 @@ function drawFoeCocci(f,warn){
       const cy=sgn*sep/2;
       g.beginPath(); g.arc(0,cy,R,0,7);
       g.fillStyle=body; g.strokeStyle=edge; g.lineWidth=1.1; g.fill(); g.stroke();
-      if(!f.dead){                                // つやと核様体
-        g.beginPath(); g.arc(-R*0.30,cy-R*0.30,R*0.34,0,7);
-        g.fillStyle='rgba(255,215,235,.26)'; g.fill();
-        g.beginPath(); g.arc(R*0.10,cy+R*0.10,R*0.26,0,7);
-        g.fillStyle='rgba(92,36,62,.35)'; g.fill();
+      if(!f.dead){                                // つや（小さいので核様体は省く）
+        g.beginPath(); g.arc(-R*0.30,cy-R*0.30,R*0.36,0,7);
+        g.fillStyle='rgba(255,215,235,.30)'; g.fill();
       }
     }
     g.shadowBlur=0;
@@ -1178,8 +1192,8 @@ function loop(ts){
     for(let b=0;b<BANDS;b++){
       const i0=Math.floor((n-1)*b/BANDS), i1=Math.floor((n-1)*(b+1)/BANDS);
       if(i1<=i0) continue;
-      const mid=path[Math.floor((i0+i1)/2)];
-      const f=Math.max(0,Math.min(1,1-(clock-mid.t)/TRAIL_LIFE));  // 1=出来たて 0=蒸発直前
+      // 頭に近いほど濃く、尻尾ほど薄い＝「あとどれだけ囲めるか」が見える
+      const f=Math.pow((b+1)/BANDS, 0.75);
       g.beginPath(); g.moveTo(path[i0].x,path[i0].y);
       for(let i=i0+1;i<=i1;i++) g.lineTo(path[i].x,path[i].y);
       if(b===BANDS-1) g.lineTo(head.x,head.y);
