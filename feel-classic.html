@@ -83,8 +83,18 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v68 (07-29 13:19)';
-try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
+const BUILD='v69 (07-29 13:24)';
+try{
+  const ve=document.getElementById('ver');
+  ve.textContent=BUILD;
+  ve.style.pointerEvents='auto'; ve.style.padding='10px 12px';
+  const tap=(ev)=>{ ev.preventDefault(); ev.stopPropagation();
+    const now=Date.now();
+    dbgTap = (now-dbgTapT<900)? dbgTap+1 : 1; dbgTapT=now;
+    if(dbgTap>=3){ dbgOn=!dbgOn; dbgTap=0; } };
+  ve.addEventListener('touchstart',tap,{passive:false});
+  ve.addEventListener('mousedown',tap);
+}catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
 const elAlly=document.getElementById('nAlly'), elFoe=document.getElementById('nFoe');
@@ -1088,6 +1098,8 @@ function unlockAudio(){
   const pr=silentEl.play(); if(pr&&pr.catch) pr.catch(()=>{});
 }
 let acUnlocked=false, acErr='', acRetry=-9;
+// デバッグ表示：?dbg=1 でも、左下のバージョンを3回タップでも出せる
+let dbgOn=(_q.get('dbg')==='1'), dbgTap=0, dbgTapT=-9;
 function ac(){
   if(!A){
     try{ A=new (window.AudioContext||window.webkitAudioContext)(); }
@@ -1973,6 +1985,22 @@ function loop(ts){
       g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, viewW()*sx, Math.min(mh, viewH()*sy));
       g.restore();
     }
+  }
+  // ?dbg=1 で状態を画面に出す（実機で原因を特定するため）。
+  // ※バージョン表示(左下)を3回続けてタップしても出せる＝URLを打ち直さなくて良い
+  if(dbgOn){
+    g.save();
+    g.font='700 12px system-ui,-apple-system,sans-serif'; g.textAlign='left'; g.textBaseline='top';
+    g.fillStyle='rgba(0,0,0,.62)'; g.fillRect(8,H-96,224,88);
+    g.fillStyle= (A&&A.state==='running')? '#8ff0c0':'#ff9a80';
+    g.fillText('音 '+(A? A.state:'未作成')+(acUnlocked?' 解錠':' 未解錠')+(acErr?' '+acErr:''), 14, H-90);
+    g.fillStyle= aura>0.35? '#9be8ff':'#bfe9d2';
+    g.fillText('速さ '+Math.round(headSpd)+' px/s', 14, H-72);
+    g.fillText('オーラ '+aura.toFixed(2)+(aura>0.35?'  ON':'  off'), 14, H-54);
+    g.fillStyle='#7a8a86';
+    g.fillText('旋回半径 '+Math.round(Math.min(9999,turnR))+'px', 14, H-36);
+    g.fillText('鎖 '+joinedCount+'  味方 '+livingRods()+'  敵 '+livingFoes(), 14, H-20);
+    g.restore();
   }
   prevHead.x=head.x; prevHead.y=head.y;
   requestAnimationFrame(loop);
