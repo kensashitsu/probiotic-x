@@ -82,6 +82,9 @@
   #rot .rt2{font-size:17px;font-weight:800;color:#8ff0c0;margin-top:26px;letter-spacing:.06em}
   #rot .rn3{font-size:12px;color:#6f7d84;margin-top:10px;line-height:1.8}
   @keyframes tilt{0%,35%{transform:rotate(0)}65%,100%{transform:rotate(-90deg)}}
+  /* 縦専用に戻した時は、絵も逆向きに回す */
+  #rot.toport .ri{width:88px;height:54px;animation-name:tilt2}
+  @keyframes tilt2{0%,35%{transform:rotate(0)}65%,100%{transform:rotate(90deg)}}
   /* 横画面は高さが足りないので、上下に使う余白を詰める */
   @media (orientation:landscape){
     #hud{top:calc(env(safe-area-inset-top) + 6px);
@@ -141,13 +144,13 @@
 <div id="over"><div class="ttl" id="overTtl"></div><div class="sub" id="overSub"></div>
   <button id="again">もう一度</button></div>
 <div id="rot"><div class="ri"></div>
-  <div class="rt2">横向きにしてください</div>
-  <div class="rn3">このゲームは横画面専用です。<br>回転ロックが入っていると向きが変わりません。</div></div>
+  <div class="rt2" id="rotTtl">横向きにしてください</div>
+  <div class="rn3">この画面の向きでは遊べません。<br>回転ロックが入っていると向きが変わりません。</div></div>
 
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v76 (07-29 14:33)';
+const BUILD='v77 (07-29 15:09)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -168,8 +171,27 @@ const elTime=document.getElementById('tleft');
 const elOver=document.getElementById('over'), elOverT=document.getElementById('overTtl'),
       elOverS=document.getElementById('overSub');
 let W,H,DPR,portrait=false;
-// ?portrait=1 で縦画面のまま遊べる（開発・検証用）
-const ALLOW_PORTRAIT=new URLSearchParams(location.search).get('portrait')==='1';
+// ============================================================
+//  ★画面の向きの方針は、この1行を書き換えるだけで戻せる
+//    'land' = 横専用（今の既定）／ 'free' = どちらでも遊べる ／ 'port' = 縦専用
+//  URLでも切り替えられる（そのまま記憶されるので、ホーム画面から起動しても効く）：
+//    ?orient=free  … 向きの制限をやめる
+//    ?orient=port  … 縦専用に戻す
+//    ?orient=land  … 横専用（既定）に戻す
+//    ?orient=reset … 記憶を消して、下の既定に従わせる
+//  盤面の余白は向きに合わせて自動で切り替わるので、どれを選んでもレイアウトは崩れない
+// ============================================================
+const ORIENT_DEFAULT='land';
+let ORIENT=ORIENT_DEFAULT;
+try{
+  const q=new URLSearchParams(location.search).get('orient');
+  if(q==='reset') localStorage.removeItem('orient');
+  else if(q==='land'||q==='free'||q==='port'){ ORIENT=q; localStorage.setItem('orient',q); }
+  else { const sv=localStorage.getItem('orient');
+         if(sv==='land'||sv==='free'||sv==='port') ORIENT=sv; }
+}catch(e){}
+// 旧来の ?portrait=1 は「どちらでも」の別名として残す
+if(new URLSearchParams(location.search).get('portrait')==='1') ORIENT='free';
 // ホーム画面から起動していれば（＝バーが無い）追加の案内は出さない
 try{
   const standalone = (navigator.standalone===true) ||
@@ -191,8 +213,14 @@ function resize(){
     PLAY_TOP=Math.max(40, Math.min(78, Math.round(hb)+8));
     BOT_PAD =Math.min(52, Math.max(32, Math.round(H*0.14)));
   } else { PLAY_TOP=110; BOT_PAD=120; }
-  portrait = !land && !ALLOW_PORTRAIT;
-  try{ document.getElementById('rot').classList.toggle('show',portrait); }catch(e){}
+  // 方針に合わない向きの間は止めて、回転を促す（変数名は歴史的に portrait のまま＝「今は遊べない」）
+  portrait = (ORIENT==='land' && !land) || (ORIENT==='port' && land);
+  try{
+    document.getElementById('rot').classList.toggle('show',portrait);
+    document.getElementById('rot').classList.toggle('toport', ORIENT==='port');
+    if(portrait) document.getElementById('rotTtl').textContent=
+      (ORIENT==='land')? '横向きにしてください' : '縦向きにしてください';
+  }catch(e){}
   // iOSはURLバーの出入りで高さが変わる。世界の外にカメラが残らないよう挟み直す
   try{ clampCam(); }catch(e){}
 }
