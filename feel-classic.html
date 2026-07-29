@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v83 (07-29 15:56)';
+const BUILD='v84 (07-29 16:04)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -342,6 +342,16 @@ const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
 //   その瞬間が来るので、囲えるようになった後もしばらく「弾かれない」余韻を残す。
 //   余韻の間は囲える・拾える（攻撃力は無い＝守りだけ残る）
 const AURA_TAIL=+(_q.get('tail')||0.55);
+// ★カメラは「指の画面位置」で流れ続けるので、指（マウス）を置いたままだと
+//   camVel が最大まで溜まり、動かしていないのに疾走扱い＝オーラが点きっぱなしになる。
+//   PCはボタンを押したままポインタを置けてしまうので特に顕著（実機のPCで発覚）。
+//   止めている間はカメラ分を疾走の判定に入れない。マウスは短く、指は長めに猶予をとる
+//   （実機では「惰性で流れている間も点いてほしい」という要望が先にあったため）
+const PARK_MOUSE=+(_q.get('park')||0.30);
+const PARK_TOUCH=+(_q.get('parkt')||1.40);
+const PARK_FADE=+(_q.get('parkf')||0.60);
+const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めている」
+let parkT=0, camW=1, isMouse=false;
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
 let aura=0, auraTail=0, saveSeen=false, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
@@ -726,7 +736,7 @@ function start(x,y){
   // カメラは「向きが確定してから」流す。初動で流すと輪が敵からずれて空振りする
   straight=0; turnRate=0; strokeT0=clock; camVel.x=0; camVel.y=0;
   dirRef={x:finger.x, y:finger.y, ang:null, t:clock};
-  auraPF.x=finger.x; auraPF.y=finger.y; aura=0; auraTail=0; headSpd=0;
+  auraPF.x=finger.x; auraPF.y=finger.y; aura=0; auraTail=0; headSpd=0; parkT=0; camW=1;
   ac(); catchNear(x,y);
 }
 function moveTo(x,y){
@@ -1149,7 +1159,7 @@ function shatter(ox,oy){
   tipMsg('雑菌に触れると鎖が弾ける！ 触れずに囲め');
 }
 
-cv.addEventListener('mousedown',e=>{ac(); const p=pos(e);
+cv.addEventListener('mousedown',e=>{ac(); isMouse=true; const p=pos(e);
   if(hitMap(finger.x,finger.y)){ mapOn=!mapOn; try{localStorage.setItem('mapOn',mapOn?'1':'0');}catch(e2){} return; }
   start(p.x,p.y);});
 cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
@@ -1161,7 +1171,7 @@ window.addEventListener('mouseup',end);
 let activeId=null;
 function findTouch(list,id){ for(let i=0;i<list.length;i++) if(list[i].identifier===id) return list[i]; return null; }
 cv.addEventListener('touchstart',e=>{e.preventDefault();
-  ac();                                        // どこを触っても必ず音を起こす
+  ac(); isMouse=false;                                        // どこを触っても必ず音を起こす
   if(activeId!==null) return;                 // 2本目以降は無視
   const t=e.changedTouches[0];
   const p=pos(t);
@@ -1660,7 +1670,11 @@ function loop(ts){
     //  頭の実移動で測ると、世界の端でカメラが止まった瞬間に速さが0になって消えてしまう
     const fspd=Math.min(2500, Math.hypot(finger.x-auraPF.x, finger.y-auraPF.y)/Math.max(0.001,dt));
     auraPF.x=finger.x; auraPF.y=finger.y;
-    const fs=Math.min(4000, Math.hypot(camVel.x,camVel.y) + fspd);
+    // 止めている時間を測り、カメラの流れを疾走とみなす重みを落としていく
+    parkT = (fspd>PARK_V)? 0 : parkT+dt;
+    const hold=isMouse? PARK_MOUSE:PARK_TOUCH;
+    camW=Math.max(0, Math.min(1, 1-(parkT-hold)/Math.max(0.05,PARK_FADE)));
+    const fs=Math.min(4000, Math.hypot(camVel.x,camVel.y)*camW + fspd);
     headSpd = (fs>headSpd)? fs : Math.max(fs, headSpd-headSpd*dt*3.2);
     // ★「速さ」と「旋回半径」の両方で決める。片方だけでは両立しない：
     //   ・速さだけ → 素早く囲もうとすると点いてしまい囲えない
@@ -2286,7 +2300,8 @@ function loop(ts){
     g.fillText('音 '+(A? A.state:'未作成')+(acUnlocked?' 解錠':' 未解錠')
       +' 再生'+sndPlays+(acErr?' '+acErr:''), 14, H-90);
     g.fillStyle= aura>0.35? '#9be8ff':'#bfe9d2';
-    g.fillText('速さ '+Math.round(headSpd)+' px/s', 14, H-72);
+    g.fillText('速さ '+Math.round(headSpd)+' px/s  流れ'+camW.toFixed(2)
+      +(parkT>0.05?'  止'+parkT.toFixed(1)+'s':''), 14, H-72);
     g.fillText('オーラ '+aura.toFixed(2)+(aura>0.35?'  ON':(auraTail>0?'  余韻'+auraTail.toFixed(2):'  off')), 14, H-54);
     g.fillStyle='#7a8a86';
     g.fillText('旋回半径 '+Math.round(Math.min(9999,turnR))+'px', 14, H-36);
