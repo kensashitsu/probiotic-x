@@ -83,7 +83,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v63 (07-29 12:02)';
+const BUILD='v64 (07-29 12:04)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -347,6 +347,9 @@ const DOOM_WARN=2.6;          // 残りこの秒数で点滅予告
 //   「払って突破するか、避けて別を狙うか」の判断に変わる＝長い鎖の使い道になる。
 //   （一律に消耗させる案は、囲むたびに拾い直しが要って作業感が出たので却下）
 const HAZE_COST=+(_q.get('haze')||8);   // 靄の中の1体を溶かすのに要る桿菌の数
+// ★封印1回につき鎖を1匹使う（何匹溶かしても1匹）。コストは軽いまま
+//   「まとめて大きく囲うほど得」が効き、鎖の長さ＝封印できる回数になる
+const SEAL_COST=+(_q.get('seal')||1);
 const SPENT_T=+(_q.get('spent')||0.8);  // 離脱後に拾えない秒数
 // ★酸の帯（なぞりの軌跡）の寿命。尾から蒸発するので、大きく囲うには素早く回る必要がある。
 //   ただし鎖が団子にならないよう「鎖の長さ＋余白」は age に関係なく必ず残す
@@ -422,7 +425,7 @@ function livingFoes(){ let n=0; for(const f of foes) if(!f.dead) n++; return n; 
 const AM_RATE=+(_q.get('am')||0.35);   // 靄の発生（個/秒・腐敗菌が多いほど増える）
 const AM_LIFE=+(_q.get('amlife')||9);  // 靄の寿命(秒)
 const AM_R   =66*SCALE;                // 靄の半径
-let ammo=[], amAcc=0, amSeen=false, divSeen=false, hazeSeen=false, hazeSeen2=false;
+let ammo=[], amAcc=0, amSeen=false, divSeen=false, hazeSeen=false, hazeSeen2=false, emptySeen=false;
 function inAmmonia(x,y){
   for(const a of ammo){ if(a.t<a.life && Math.hypot(x-a.x,y-a.y)<a.r) return true; }
   return false;
@@ -463,7 +466,7 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; lunges=[]; aura=0; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; phase='play'; playT=0;
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; phase='play'; playT=0;
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -687,9 +690,19 @@ function polyArea(poly){
   return Math.abs(s/2);
 }
 function doSeal(poly){
+  let resisted0=0;
   // ★囲った内側は全部溶ける。容量制も消耗も入れない ─ その場で結果が出ることが
   //   このゲームの分かりやすさの核だった（後から足した仕組みは全て遅延型で、
   //   「今の操作が正しかったのか」がその場で分からなくなっていた）
+  // 酸を出す菌が1匹もいなければ溶かせない
+  if(joinedCount<=0){
+    for(const f of foes){ if(!f.dead && pointInPoly(f.x,f.y,poly)){ f.resist=1; resisted0++; } }
+    if(resisted0>0){ resistSnd(resisted0);
+      if(!emptySeen){ emptySeen=true; tipMsg('酸を出す乳酸菌がいない ─ まず繋いでから囲め'); } }
+    seals.push({poly, life:1, strong:0, partial:true});
+    fizz(0,0);
+    return;
+  }
   let sealed=0, resisted=0, paid=0;
   const hazed=[];
   for(const f of foes){
@@ -716,6 +729,7 @@ function doSeal(poly){
     }else if(!hazeSeen2){ hazeSeen2=true;
       tipMsg('靄の中の菌には鎖が'+HAZE_COST+'匹分要る ─ もっと繋いでから囲め'); }
   }
+  if(sealed>0) spendChain(SEAL_COST);      // 何匹溶かしても1回1匹
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
