@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v43 (07-29 09:05)';
+const BUILD='v44 (07-29 09:17)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -134,15 +134,15 @@ const CHAIN_MAX=+(_q.get('chain')||7);   // 連鎖の最大の長さ
 // ★疾走すると酸のオーラを纏う。触れた連鎖は弾け飛び、球菌は近くの仲間と繋がり直そうとする。
 //   間に合わなければ死滅＝数が減る。走る＝安全だが囲めない／囲む＝減速して危険、という
 //   緊張が生まれる。オーラの大きさは繋いだ数で決まる＝ここでも繋ぐ意味が出る
-// ★立ち上がりが遅いと「纏った頃には画面端」になる。輪を描く動き(毎秒150〜250px)より
-//   少し上を閾値にして、走り出しの一瞬で点くようにする
-const AURA_LO=+(_q.get('auralo')||280);   // これ以上の速さでオーラが出始める(px/秒)
-const AURA_HI=+(_q.get('aurahi')||620);   // ここで最大
+// ★判定は「指の画面上の速さ」。輪を描く動き(150〜250px/s)では点かず、
+//   意識して速く払った時だけ点く。立ち上がりは即時（速さは上がるとき即反映）
+const AURA_LO=+(_q.get('auralo')||520);   // 指がこの速さを超えるとオーラが出始める(px/秒)
+const AURA_HI=+(_q.get('aurahi')||1100);  // ここで最大
 const AURA_R0=+(_q.get('aura0')||26);     // オーラの基準半径
 const AURA_PER=+(_q.get('aurap')||1.5);   // 桿菌1匹あたり広がる分
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
-let aura=0, headSpd=0, sosKilled=0, burstSeen=false;
+let aura=0, headSpd=0, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
 function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
 const FOE_R=RW*FOE_K/2;                       // 腐敗菌の半径
@@ -313,8 +313,16 @@ function followCam(dt){
 }
 function inView(x,y,m){ m=m||60;
   return x>cam.x-m && x<cam.x+viewW()+m && y>cam.y-m && y<cam.y+viewH()+m; }
-function startCount(){ return N_ABS>0? N_ABS : Math.max(12, Math.round(N_REF*playArea()/REF_AREA)); }
-function capCount(){ return Math.round(startCount()*CAP_K); }
+// ★上限が必須。マップは画面の3倍なので、面積＝画面サイズの二乗で効く。
+//   1920x1080のPCだと片側約1000匹・上限9000匹になり、描画が追いつかず固まる（実際に発生）。
+//   スマホ(375x667)は100匹。密度は保ちつつ、総数だけ頭打ちにする
+const N_MAX  =+(_q.get('nmax')||240);
+const CAP_MAX=+(_q.get('capmax')||1100);
+function startCount(){
+  if(N_ABS>0) return N_ABS;
+  return Math.max(12, Math.min(N_MAX, Math.round(N_REF*playArea()/REF_AREA)));
+}
+function capCount(){ return Math.min(CAP_MAX, Math.round(startCount()*CAP_K)); }
 function rodCount(){ return startCount(); }
 function foeCount(){ return startCount(); }
 // ★総数が勝敗そのものになったので、四散のコストが跳ね上がった（1回ぶつかると
@@ -420,7 +428,7 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; lunges=[]; aura=0; headSpd=0; sosKilled=0; burstSeen=false; gauge=0.5; phase='play'; playT=0;
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; lunges=[]; aura=0; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; phase='play'; playT=0;
   foeAcc=0; allyAcc=0; loupeA=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -475,6 +483,7 @@ function start(x,y){
   // カメラは「向きが確定してから」流す。初動で流すと輪が敵からずれて空振りする
   straight=0; turnRate=0; strokeT0=clock; camVel.x=0; camVel.y=0;
   dirRef={x:finger.x, y:finger.y, ang:null, t:clock};
+  auraPF.x=finger.x; auraPF.y=finger.y; aura=0; headSpd=0;
   ac(); catchNear(x,y);
 }
 function moveTo(x,y){
@@ -486,6 +495,13 @@ function moveTo(x,y){
 }
 function end(){ dragging=false; }
 function catchNear(x,y){
+  // ★酸を纏っている間は拾えない。走りながら無限に伸ばせると無双になってしまう。
+  //   「減速して集める → 加速して薙ぎ払う → 減速して囲む」という切り替えを作る
+  if(aura>0.35){
+    if(!noCatchSeen && joinedCount>0){ noCatchSeen=true;
+      tipMsg('酸を纏っている間は拾えない ─ 集めるには速度を落とす'); }
+    return;
+  }
   for(const r of rods){
     if(r.joined) continue;
     if(r.spent>0) continue;          // 消耗中は酸を出せない＝拾えない
@@ -1050,10 +1066,14 @@ function loop(ts){
            Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y/zoom+cam.y)));
     trimTrail();
     // 頭の速さ→オーラ
-    const hs=Math.hypot(head.x-prevHead.x, head.y-prevHead.y)/Math.max(0.001,dt);
-    // 速さは「上がるのは即時・下がるのは緩やか」で取る。平均で取ると立ち上がりが鈍って
-    //  点いた頃には走り終わっている（実測で約0.3秒の遅れがあった）
-    headSpd = (hs>headSpd)? hs : Math.max(hs, headSpd-headSpd*dt*3.2);
+    // ★オーラは「指を画面上でどれだけ速く動かしているか」で決める。
+    //   頭の世界速度で見ると、指を画面の外寄りに置くだけでカメラが毎秒600〜1300px流れて
+    //   常時オンになり、集められなくなる（実測：どの速さでもオーラ平均0.7超）。
+    //   指の速さなら自分の意思で武装/解除でき、移動しながら集めることもできる。
+    //   1フレームの飛び（触り直し等）で誤爆しないよう上限をかける
+    const fs=Math.min(4000, Math.hypot(finger.x-auraPF.x, finger.y-auraPF.y)/Math.max(0.001,dt));
+    auraPF.x=finger.x; auraPF.y=finger.y;
+    headSpd = (fs>headSpd)? fs : Math.max(fs, headSpd-headSpd*dt*3.2);
     const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)));
     aura += (want-aura)*Math.min(1,dt*(want>aura?26:5));
     if(aura>0.35 && joinedCount>0) auraBurst(); else checkHit();
@@ -1373,7 +1393,7 @@ function loop(ts){
     // ★靄の中は酸が中和されて拾えない。理由が見えるようにくすませる
     if(ammo.length && inAmmonia(r.x,r.y)){ weak=true; alpha*=0.55; }
     // ★磁石で吸い付く手触りの核。近づくほど強く引かれ、向きも頭を向く
-    if(dragging && r.spent<=0 && r.dying==null){
+    if(dragging && aura<=0.35 && r.spent<=0 && r.dying==null){
       const d=Math.hypot(r.x-head.x,r.y-head.y);
       if(d<PULL_R && d>0.01){
         const t=1-d/PULL_R;                    // 0（遠い）〜1（目前）
