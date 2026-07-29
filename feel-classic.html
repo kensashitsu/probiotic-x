@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v57 (07-29 11:01)';
+const BUILD='v58 (07-29 11:08)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -803,16 +803,31 @@ function burstSnd(n){ if(!A)return; try{
   src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
 }catch(e){} }
 function shatter(ox,oy){
-  const joined=rods.filter(r=>r.joined);
+  const joined=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
   if(joined.length===0){ // 空の鎖でも軽い弾き
     hitCd=0.25; shake=Math.max(shake,4); breakSnd(0); return; }
-  for(const r of joined){
-    r.joined=false; r.order=0;
-    // 衝突点から放射状に、大きくばらけて飛ばす（回収に手間をかける）
-    const a=Math.atan2(r.y-oy,r.x-ox)+rnd(-1.0,1.0);
-    const sp=rnd(7,16);             // 拾い直せる範囲に散らす
-    r.vx=Math.cos(a)*sp; r.vy=Math.sin(a)*sp; r.vr=rnd(-0.6,0.6);
-    r.doom=DOOM;                    // 餓死タイマー開始（拾えば救出）
+  // ★全部バラバラにはしない。ランダムな長さの塊のまま飛び散る方が、
+  //   拾い直しに変化が出るし、ちぎれた鎖という見た目にも合う
+  const SIZES=[1,1,1,2,2,3,4];
+  let i=0;
+  while(i<joined.length){
+    let n=SIZES[(Math.random()*SIZES.length)|0];
+    if(i+n>joined.length) n=joined.length-i;
+    const frag=joined.slice(i,i+n); i+=n;
+    // 塊はひとまとまりで飛ぶ（同じ向き・同じ速さ＋少しのばらつき）
+    const c=frag[0];
+    const a=Math.atan2(c.y-oy,c.x-ox)+rnd(-0.8,0.8);
+    const sp=rnd(7,16);
+    const vx=Math.cos(a)*sp, vy=Math.sin(a)*sp, vr=rnd(-0.5,0.5);
+    for(let k=0;k<frag.length;k++){
+      const r=frag[k];
+      r.joined=false; r.order=0;
+      r.vx=vx+rnd(-1.2,1.2); r.vy=vy+rnd(-1.2,1.2); r.vr=vr;
+      r.doom=DOOM;                    // 餓死タイマー開始（拾えば救出）
+      // 塊の中では繋がったまま
+      r.link=null; r.next=null; r.clen=0;
+      if(k>0){ r.link=frag[k-1]; frag[k-1].next=r; r.clen=k; }
+    }
   }
   shards.push({x:ox,y:oy,life:1});
   joinedCount=0; orderSeq=0;
