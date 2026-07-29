@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v82 (07-29 15:45)';
+const BUILD='v83 (07-29 15:56)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -361,6 +361,10 @@ const CAP_K=+(_q.get('cap')||9.0);   // 食品に入りきる総数＝開始数�
 // 敵の密度。狭い画面で通り道が無くなるのが避けられなさの主因なので既定を下げる
 const FOES_REF=+(new URLSearchParams(location.search).get('foes')||10);
 
+// ★壁際の菌は回り込めず囲えなかった（実機で指摘）。菌の居場所を盤面より内側にして、
+//   縁に「通路」を作る。これで端の敵にも必ず外側から回り込める。
+//   ぬか床と容器の内壁のすきま、という見立てでもある
+const EDGE_M=+(new URLSearchParams(location.search).get('edge')||64);
 // 盤面の上下端はここで一元管理する（HUDとボタンを避ける分だけ空ける）。
 // ★横画面は高さが半分以下になるので、同じ値だと盤面が細い帯になってしまう。
 //   HUDが薄くなる分だけ上を詰め、手が被る下側も横持ちでは浅いので詰める。
@@ -659,7 +663,7 @@ function scatter(){
   rods=[];
   const N=rodCount();
   for(let i=0;i<N;i++){
-    rods.push({x:rnd(40,worldW()-40), y:rnd(PLAY_TOP,worldBot()), ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28, vx:0,vy:0,vr:0, doom:0, spent:0, dead:false,
+    rods.push({x:rnd(EDGE_M,worldW()-EDGE_M), y:rnd(PLAY_TOP+EDGE_M,worldBot()-EDGE_M), ang:Math.random()*Math.PI, joined:false, order:0, phase:Math.random()*6.28, vx:0,vy:0,vr:0, doom:0, spent:0, dead:false,
       wa:rnd(0,6.283), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
   }
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
@@ -691,7 +695,7 @@ function killAllyNear(x,y,R){
 function spawnFoe(){
   const spikes=[]; const n=9;
   for(let i=0;i<n;i++) spikes.push(0.75+Math.random()*0.5);
-  foes.push({x:rnd(50,worldW()-50), y:rnd(PLAY_TOP+12,worldBot()-12), r:FOE_R*rnd(0.88,1.14), ang:Math.random()*Math.PI*2,
+  foes.push({x:rnd(EDGE_M,worldW()-EDGE_M), y:rnd(PLAY_TOP+EDGE_M,worldBot()-EDGE_M), r:FOE_R*rnd(0.88,1.14), ang:Math.random()*Math.PI*2,
              phase:Math.random()*6.28, spin:rnd(-0.5,0.5), dead:false, dt:0, spikes,
              wa:rnd(0,6.283), ws:rnd(.55,1.45)});
 }
@@ -1709,7 +1713,7 @@ function loop(ts){
         const d=f.r*0.65;
         spawnFoe(); const nf=foes[foes.length-1];
         nf.x=Math.max(f.r+8, Math.min(worldW()-f.r-8, f.x+Math.cos(a)*d));
-        nf.y=Math.max(PLAY_TOP+f.r+8, Math.min(worldBot()-f.r-8, f.y+Math.sin(a)*d));
+        nf.y=Math.max(PLAY_TOP+EDGE_M, Math.min(worldBot()-EDGE_M, f.y+Math.sin(a)*d));
         nf.r=f.r*rnd(.92,1.02); nf.born=clock; nf.ang=f.ang; nf.wa=f.wa+rnd(-1,1);
         // ★連鎖球菌（腸球菌）：分裂面が一方向なので、娘細胞は離れずに繋がって数珠になる。
         //   一定の長さで切れる（実際の鎖も無限には伸びない）
@@ -1754,7 +1758,7 @@ function loop(ts){
         r.div=0;
         const d=RLEN*0.81;
         const nr={x:Math.max(24,Math.min(worldW()-24,r.x+Math.cos(r.ang)*d)),
-                   y:Math.max(PLAY_TOP,Math.min(worldBot(),r.y+Math.sin(r.ang)*d)),
+                   y:Math.max(PLAY_TOP+EDGE_M,Math.min(worldBot()-EDGE_M,r.y+Math.sin(r.ang)*d)),
                    ang:r.ang, joined:false, order:0, phase:Math.random()*6.28,
                    vx:0,vy:0,vr:0, doom:0, spent:0, dead:false, born:clock,
                    wa:r.wa+rnd(-.8,.8), ws:rnd(.55,1.45), spin:rnd(-.22,.22)};
@@ -1803,8 +1807,8 @@ function loop(ts){
       const sp=ROD_DRIFT*r.ws;
       r.x+=Math.cos(r.wa)*sp*dt; r.y+=Math.sin(r.wa)*sp*dt;
       r.ang+=(r.spin||0)*dt;                   // ゆっくり向きも変わる
-      if(r.x<24){ r.x=24; r.wa=Math.PI-r.wa; } else if(r.x>wx-24){ r.x=wx-24; r.wa=Math.PI-r.wa; }
-      if(r.y<PLAY_TOP-14){ r.y=PLAY_TOP-14; r.wa=-r.wa; } else if(r.y>yb+14){ r.y=yb+14; r.wa=-r.wa; }
+      if(r.x<EDGE_M){ r.x=EDGE_M; r.wa=Math.PI-r.wa; } else if(r.x>wx-EDGE_M){ r.x=wx-EDGE_M; r.wa=Math.PI-r.wa; }
+      if(r.y<PLAY_TOP+EDGE_M){ r.y=PLAY_TOP+EDGE_M; r.wa=-r.wa; } else if(r.y>yb-EDGE_M){ r.y=yb-EDGE_M; r.wa=-r.wa; }
     }
     for(const f of foes){
       if(f.dead) continue;
@@ -1815,7 +1819,7 @@ function loop(ts){
         // 飛んだ勢い
         if(f.vx||f.vy){ f.x+=f.vx*dt; f.y+=f.vy*dt;
           const dmp=Math.pow(0.06,dt); f.vx*=dmp; f.vy*=dmp;
-          const m2=f.r+6;
+          const m2=f.r+EDGE_M;
           if(f.x<m2){f.x=m2;f.vx*=-0.5;} else if(f.x>worldW()-m2){f.x=worldW()-m2;f.vx*=-0.5;}
           if(f.y<PLAY_TOP+m2){f.y=PLAY_TOP+m2;f.vy*=-0.5;} else if(f.y>worldBot()-m2){f.y=worldBot()-m2;f.vy*=-0.5;}
           if(Math.abs(f.vx)<3&&Math.abs(f.vy)<3){ f.vx=0; f.vy=0; } }
@@ -1848,7 +1852,7 @@ function loop(ts){
       if(f.vx||f.vy){
         f.x+=f.vx*dt; f.y+=f.vy*dt;
         const dmp=Math.pow(0.05,dt); f.vx*=dmp; f.vy*=dmp;
-        const mb=f.r+6;
+        const mb=f.r+EDGE_M;
         if(f.x<mb){f.x=mb;f.vx*=-0.5;} else if(f.x>wx-mb){f.x=wx-mb;f.vx*=-0.5;}
         if(f.y<PLAY_TOP+mb){f.y=PLAY_TOP+mb;f.vy*=-0.5;} else if(f.y>yb-mb){f.y=yb-mb;f.vy*=-0.5;}
         if(Math.abs(f.vx)<4&&Math.abs(f.vy)<4){ f.vx=0; f.vy=0; }
@@ -1857,7 +1861,7 @@ function loop(ts){
       f.wa+=Math.sin(clock*0.27+f.phase)*dt*0.8;
       const sp=FOE_DRIFT*f.ws;
       f.x+=Math.cos(f.wa)*sp*dt; f.y+=Math.sin(f.wa)*sp*dt;
-      const m=f.r+6;
+      const m=f.r+EDGE_M;
       if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
       if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
     }
@@ -1901,7 +1905,7 @@ function loop(ts){
       }
     }
     for(const f of foes){ if(f.dead) continue;
-      const m=f.r+6;
+      const m=f.r+EDGE_M;
       f.x=Math.max(m,Math.min(wx-m,f.x)); f.y=Math.max(PLAY_TOP+m,Math.min(yb-m,f.y)); }
   }
 
@@ -1916,6 +1920,11 @@ function loop(ts){
   // 世界の縁（どこまで行けるか分かるように薄く）
   g.strokeStyle='rgba(120,200,180,.10)'; g.lineWidth=2;
   g.strokeRect(0,PLAY_TOP,worldW(),worldBot()-PLAY_TOP);
+  // ★菌がいるのはここまで。外側の帯は「回り込むための通路」＝端の敵も囲める
+  g.save(); g.strokeStyle='rgba(140,220,190,.13)'; g.lineWidth=1.4;
+  g.setLineDash([10,10]); g.lineDashOffset=-clock*8;
+  g.strokeRect(EDGE_M,PLAY_TOP+EDGE_M,worldW()-EDGE_M*2,worldBot()-PLAY_TOP-EDGE_M*2);
+  g.restore();
 
   // アンモニアの靄（敵の攻撃）＝酸を中和する領域。
   // 輪郭のある円だと"紫の玉"に見えてしまうので、ずれた靄を重ねて気体に見せる
@@ -2073,8 +2082,8 @@ function loop(ts){
     if(!inView(r.x,r.y) && !(r.vx||r.vy) && !(r.doom>0)) continue;
     // 弾け飛んだ勢い（あれば）を減衰させながら適用
     if(r.vx||r.vy){ r.x+=r.vx; r.y+=r.vy; r.ang+=r.vr; r.vx*=0.93; r.vy*=0.93; r.vr*=0.93;
-      if(r.x<24){r.x=24;r.vx*=-0.5;} if(r.x>worldW()-24){r.x=worldW()-24;r.vx*=-0.5;}
-      if(r.y<PLAY_TOP-20){r.y=PLAY_TOP-20;r.vy*=-0.5;} if(r.y>worldBot()+20){r.y=worldBot()+20;r.vy*=-0.5;}
+      if(r.x<EDGE_M){r.x=EDGE_M;r.vx*=-0.5;} if(r.x>worldW()-EDGE_M){r.x=worldW()-EDGE_M;r.vx*=-0.5;}
+      if(r.y<PLAY_TOP+EDGE_M){r.y=PLAY_TOP+EDGE_M;r.vy*=-0.5;} if(r.y>worldBot()-EDGE_M){r.y=worldBot()-EDGE_M;r.vy*=-0.5;}
       if(Math.abs(r.vx)<0.05&&Math.abs(r.vy)<0.05){r.vx=0;r.vy=0;r.vr=0;} }
     r.phase+=dt*1.5; const wob=Math.sin(r.phase)*0.06;
     // ★消耗中（酸を出し切った）＝くすんで拾えない。回復したら元に戻る
