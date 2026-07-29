@@ -1,0 +1,10 @@
+{
+  "name": "ぬか床を守れ ─ プロバイオティＸ",
+  "short_name": "ぬか床を守れ",
+  "start_url": "feel-classic.html",
+  "scope": ".",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14"
+}
