@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v54 (07-29 10:40)';
+const BUILD='v55 (07-29 10:41)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -404,6 +404,18 @@ function inAmmonia(x,y){
 }
 let gauge=0.5, phase='play', playT=0;
 let foeAcc=0, allyAcc=0;
+// ★ミニマップはタップで開閉できる。閉じている間は小さなつまみだけ残す
+let mapOn = (localStorage.getItem('mapOn')!=='0');
+function mapRect(){
+  if(WORLD<=1 || _q.get('map')==='0') return null;
+  if(!mapOn) return {x:10,y:100,w:24,h:24,mini:true};
+  const mw=84, mh=Math.round(mw*(worldBot()-PLAY_TOP)/worldW());
+  return {x:10,y:100,w:mw,h:mh,mini:false};
+}
+function hitMap(sx,sy){
+  const r=mapRect(); if(!r) return false;
+  return sx>=r.x-8 && sx<=r.x+r.w+8 && sy>=r.y-8 && sy<=r.y+r.h+8;
+}
 let rods=[];   // {x,y,ang,joined,order,phase}
 let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
 let bits=[];   // 溶けカス粒子
@@ -764,7 +776,9 @@ function shatter(ox,oy){
   tipMsg('雑菌に触れると鎖が弾ける！ 触れずに囲め');
 }
 
-cv.addEventListener('mousedown',e=>{const p=pos(e);start(p.x,p.y);});
+cv.addEventListener('mousedown',e=>{const p=pos(e);
+  if(hitMap(finger.x,finger.y)){ mapOn=!mapOn; try{localStorage.setItem('mapOn',mapOn?'1':'0');}catch(e2){} return; }
+  start(p.x,p.y);});
 cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
 window.addEventListener('mouseup',end);
 // ★阻害要素①：最初の指だけを操作に使う。
@@ -775,8 +789,12 @@ let activeId=null;
 function findTouch(list,id){ for(let i=0;i<list.length;i++) if(list[i].identifier===id) return list[i]; return null; }
 cv.addEventListener('touchstart',e=>{e.preventDefault();
   if(activeId!==null) return;                 // 2本目以降は無視
-  const t=e.changedTouches[0]; activeId=t.identifier;
-  const p=pos(t); start(p.x,p.y);},{passive:false});
+  const t=e.changedTouches[0];
+  const p=pos(t);
+  if(hitMap(finger.x,finger.y)){              // 地図をタップ＝開閉（操作は始めない）
+    mapOn=!mapOn; try{localStorage.setItem('mapOn',mapOn?'1':'0');}catch(e2){}
+    return; }
+  activeId=t.identifier; start(p.x,p.y);},{passive:false});
 cv.addEventListener('touchmove',e=>{e.preventDefault();
   const t=findTouch(e.changedTouches,activeId); if(!t) return;
   const p=pos(t); moveTo(p.x,p.y);},{passive:false});
@@ -1560,43 +1578,43 @@ function loop(ts){
 
   g.restore(); // 世界座標ここまで＋画面揺れ
 
-  // ミニマップ：広い世界のどこに何が居るかを把握するための最小限の表示
-  if(WORLD>1 && _q.get('map')!=='0'){
-    const mw=84, mh=Math.round(mw*(worldBot()-PLAY_TOP)/worldW()), mx=10, my=100;
-    g.save();
-    g.fillStyle='rgba(10,16,20,.55)'; g.strokeStyle='rgba(140,240,200,.22)'; g.lineWidth=1;
-    g.beginPath(); g.rect(mx,my,mw,mh); g.fill(); g.stroke();
-    const sx=mw/worldW(), sy=mh/(worldBot()-PLAY_TOP);
-    // 味方（乳酸菌）を先に敷く。どちらが優勢かが地図の色で分かる
-    g.fillStyle='rgba(170,240,215,.85)';
-    for(const r of rods){ if(r.dying!=null) continue;
-      g.beginPath(); g.arc(mx+r.x*sx, my+(r.y-PLAY_TOP)*sy, 1.25, 0, 7); g.fill(); }
-    g.fillStyle='rgba(232,130,175,.95)';
-    for(const f of foes){ if(f.dead) continue;
-      g.beginPath(); g.arc(mx+f.x*sx, my+(f.y-PLAY_TOP)*sy, 1.55, 0, 7); g.fill(); }
-    // 今なぞっている線
-    if(dragging && path.length>1 && aura<=0.35){
-      g.beginPath(); g.moveTo(mx+path[0].x*sx, my+(path[0].y-PLAY_TOP)*sy);
-      for(let i=1;i<path.length;i++) g.lineTo(mx+path[i].x*sx, my+(path[i].y-PLAY_TOP)*sy);
-      g.strokeStyle='rgba(160,255,215,.85)'; g.lineWidth=1.2; g.stroke();
-      g.beginPath(); g.arc(mx+head.x*sx, my+(head.y-PLAY_TOP)*sy, 2.2, 0, 7);
-      g.fillStyle='#c8ffe6'; g.fill();
+  // ミニマップ：広い世界のどこに何が居るかを把握する。タップで開閉できる
+  {
+    const R=mapRect();
+    if(R && R.mini){
+      g.save();
+      g.fillStyle='rgba(10,16,20,.55)'; g.strokeStyle='rgba(140,240,200,.30)'; g.lineWidth=1;
+      g.beginPath(); g.rect(R.x,R.y,R.w,R.h); g.fill(); g.stroke();
+      g.fillStyle='rgba(170,240,215,.75)';
+      for(let i=0;i<3;i++) for(let j=0;j<3;j++){
+        g.beginPath(); g.arc(R.x+7+i*5, R.y+7+j*5, 1.3, 0, 7); g.fill(); }
+      g.restore();
+    }else if(R){
+      const mw=R.w, mh=R.h, mx=R.x, my=R.y;
+      g.save();
+      g.fillStyle='rgba(10,16,20,.55)'; g.strokeStyle='rgba(140,240,200,.22)'; g.lineWidth=1;
+      g.beginPath(); g.rect(mx,my,mw,mh); g.fill(); g.stroke();
+      const sx=mw/worldW(), sy=mh/(worldBot()-PLAY_TOP);
+      // 味方（乳酸菌）を先に敷く。どちらが優勢かが地図の色で分かる
+      g.fillStyle='rgba(170,240,215,.85)';
+      for(const r of rods){ if(r.dying!=null) continue;
+        g.beginPath(); g.arc(mx+r.x*sx, my+(r.y-PLAY_TOP)*sy, 1.25, 0, 7); g.fill(); }
+      g.fillStyle='rgba(232,130,175,.95)';
+      for(const f of foes){ if(f.dead) continue;
+        g.beginPath(); g.arc(mx+f.x*sx, my+(f.y-PLAY_TOP)*sy, 1.55, 0, 7); g.fill(); }
+      // 今なぞっている線
+      if(dragging && path.length>1){
+        g.beginPath(); g.moveTo(mx+path[0].x*sx, my+(path[0].y-PLAY_TOP)*sy);
+        for(let i=1;i<path.length;i++) g.lineTo(mx+path[i].x*sx, my+(path[i].y-PLAY_TOP)*sy);
+        g.strokeStyle='rgba(160,255,215,.85)'; g.lineWidth=1.2; g.stroke();
+        g.beginPath(); g.arc(mx+head.x*sx, my+(head.y-PLAY_TOP)*sy, 2.2, 0, 7);
+        g.fillStyle='#c8ffe6'; g.fill();
+      }
+      // 今見えている範囲
+      g.strokeStyle='rgba(200,255,230,.4)'; g.lineWidth=1;
+      g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, viewW()*sx, Math.min(mh, viewH()*sy));
+      g.restore();
     }
-    // 今見えている範囲
-    g.strokeStyle='rgba(200,255,230,.4)'; g.lineWidth=1;
-    g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, viewW()*sx, Math.min(mh, viewH()*sy));
-    g.restore();
-  }
-  // ?dbg=1 で指の速さとオーラを画面に出す（実機で閾値を合わせるため）
-  if(_q.get('dbg')==='1'){
-    g.save();
-    g.font='700 12px system-ui,-apple-system,sans-serif'; g.textAlign='left'; g.textBaseline='top';
-    g.fillStyle='rgba(0,0,0,.55)'; g.fillRect(8,H-58,196,50);
-    g.fillStyle= aura>0.35? '#9be8ff':'#bfe9d2';
-    g.fillText('速さ '+Math.round(headSpd)+' px/s', 14, H-52);
-    g.fillText('オーラ '+aura.toFixed(2)+(aura>0.35?'  ON':'  off'), 14, H-34);
-    g.fillStyle='#7a8a86'; g.fillText('点灯 '+AURA_LO+'〜'+AURA_HI+' px/s', 14, H-18);
-    g.restore();
   }
   prevHead.x=head.x; prevHead.y=head.y;
   requestAnimationFrame(loop);
