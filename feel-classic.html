@@ -83,7 +83,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v66 (07-29 13:02)';
+const BUILD='v67 (07-29 13:12)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -811,13 +811,15 @@ function spendChain(n){
 }
 // 砕ける破片（丸い粒ではなく、割れた棒切れに見せる）
 function shatterBits(x,y,ang){
-  for(let i=0;i<7;i++){
-    const a=(ang||0)+rnd(-0.9,0.9), sp=rnd(1.4,4.2);
+  // ★敵が溶けた時（ミントの粒）と混同しないよう、白い破片＋白い衝撃輪＋「−1」の数字で見せる
+  for(let i=0;i<10;i++){
+    const a=rnd(0,6.283), sp=rnd(2.2,6.0);
     bits.push({x:x+rnd(-2,2), y:y+rnd(-2,2),
-      vx:Math.cos(a)*sp*rnd(-1,1.4), vy:Math.sin(a)*sp*rnd(-1,1.4)-0.6,
-      life:1, r:rnd(1.0,2.2), len:rnd(2.5,6.5)*SCALE, ang:a, spin:rnd(-0.5,0.5), white:1});
+      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-0.8,
+      life:1.6, r:rnd(1.6,3.0), len:rnd(5,11)*SCALE, ang:a, spin:rnd(-0.6,0.6), white:1});
   }
-  bits.push({x:x, y:y, life:1, r:1, flash:1});
+  bits.push({x:x, y:y, life:1.2, r:1, flash:1});
+  bits.push({x:x, y:y-6, vx:0, vy:-0.55, life:1.5, r:1, txt:'-1'});
 }
 function crackSnd(){ if(!A)return; try{
   const t=A.currentTime, dur=0.13;
@@ -999,7 +1001,7 @@ function shatter(ox,oy){
   tipMsg('雑菌に触れると鎖が弾ける！ 触れずに囲め');
 }
 
-cv.addEventListener('mousedown',e=>{const p=pos(e);
+cv.addEventListener('mousedown',e=>{ac(); const p=pos(e);
   if(hitMap(finger.x,finger.y)){ mapOn=!mapOn; try{localStorage.setItem('mapOn',mapOn?'1':'0');}catch(e2){} return; }
   start(p.x,p.y);});
 cv.addEventListener('mousemove',e=>{const p=pos(e);moveTo(p.x,p.y);});
@@ -1011,6 +1013,7 @@ window.addEventListener('mouseup',end);
 let activeId=null;
 function findTouch(list,id){ for(let i=0;i<list.length;i++) if(list[i].identifier===id) return list[i]; return null; }
 cv.addEventListener('touchstart',e=>{e.preventDefault();
+  ac();                                        // どこを触っても必ず音を起こす
   if(activeId!==null) return;                 // 2本目以降は無視
   const t=e.changedTouches[0];
   const p=pos(t);
@@ -1029,7 +1032,10 @@ cv.addEventListener('touchend',touchOff,{passive:false});
 // 指が画面外に出た/システムジェスチャで奪われた時に握ったままにならないよう保険
 cv.addEventListener('touchcancel',touchOff,{passive:false});
 // アプリが背面に回った時も握りを解く（戻った時に鎖が固まったままになるのを防ぐ）
-document.addEventListener('visibilitychange',()=>{ if(document.hidden){ activeId=null; end(); } });
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){ activeId=null; end(); }
+  else if(A&&A.state!=='running'){ try{A.resume();}catch(e){} }
+});
 document.getElementById('reset').addEventListener('click',()=>{scatter();});
 document.getElementById('again').addEventListener('click',()=>{scatter();});
 
@@ -1067,7 +1073,25 @@ function pointBack(d){
 }
 
 // ---- Web Audio ----
-let A=null; function ac(){ if(!A){ try{A=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(A&&A.state==='suspended')A.resume(); }
+// ★iOSでは、無音の<audio>を一度鳴らして「再生セッション」を開かないと、
+//   WebAudioが本体のマナーモード(消音スイッチ)で丸ごと無音になる。これが実機で音が出ない主因。
+//   さらに AudioContext は必ずタップの中で作る／復帰させる必要がある。
+let A=null, silentEl=null;
+function unlockAudio(){
+  if(!silentEl){
+    silentEl=document.createElement('audio');
+    silentEl.setAttribute('playsinline','');
+    silentEl.loop=true; silentEl.volume=0.01;
+    // 無音のごく短いwav（これを鳴らすと再生セッションが開く）
+    silentEl.src='data:audio/wav;base64,UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+  }
+  const pr=silentEl.play(); if(pr&&pr.catch) pr.catch(()=>{});
+}
+function ac(){
+  if(!A){ try{A=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} }
+  if(A&&A.state!=='running'){ try{A.resume();}catch(e){} }
+  unlockAudio();
+}
 function pop(n){ if(!A)return; try{
   const t=A.currentTime, o=A.createOscillator(), gg=A.createGain();
   const base=520+Math.min(n,40)*26;
@@ -1689,19 +1713,32 @@ function loop(ts){
   seals=seals.filter(s=>s.life>0);
 
   // 溶けカス
-  for(const b of bits){ b.x+=b.vx; b.y+=b.vy; b.vy+=0.06; b.life-=dt*1.6;
+  for(const b of bits){ b.x+=b.vx; b.y+=b.vy;
+    if(!b.txt) b.vy+=0.06;
+    if(b.len||b.flash||b.txt){ b.vx*=0.96; b.vy*=0.96; }
+    b.life-=dt*(b.txt?1.1:(b.len?1.0:1.6));
     if(b.life<=0) continue;
-    if(b.flash){                              // 砕けた瞬間の閃光
-      const k=b.life*b.life;
-      g.beginPath(); g.arc(b.x,b.y,(1-b.life)*22+3,0,7);
-      g.strokeStyle='rgba(230,255,245,'+(0.7*k)+')'; g.lineWidth=1+3*k; g.stroke();
+    if(b.txt){                                // 「−1」＝弾薬を1つ失った
+      const k=Math.min(1,b.life);
+      g.save(); g.font='800 '+(15*SCALE)+'px system-ui,-apple-system,sans-serif';
+      g.textAlign='center'; g.textBaseline='middle';
+      g.lineWidth=3; g.strokeStyle='rgba(6,14,12,'+(0.8*k)+')'; g.strokeText(b.txt,b.x,b.y);
+      g.fillStyle='rgba(255,255,255,'+(0.95*k)+')'; g.fillText(b.txt,b.x,b.y);
+      g.restore(); continue;
+    }
+    if(b.flash){                              // 砕けた瞬間の白い衝撃輪
+      const k=Math.min(1,b.life), t=1-k;
+      g.beginPath(); g.arc(b.x,b.y,t*46+4,0,7);
+      g.strokeStyle='rgba(255,255,255,'+(0.85*k*k)+')'; g.lineWidth=1+5*k; g.stroke();
+      g.beginPath(); g.arc(b.x,b.y,t*26+2,0,7);
+      g.strokeStyle='rgba(190,240,255,'+(0.5*k)+')'; g.lineWidth=1+3*k; g.stroke();
       continue;
     }
     if(b.len){                                // 割れた棒切れ
       b.ang+=(b.spin||0);
       g.save(); g.translate(b.x,b.y); g.rotate(b.ang);
-      g.strokeStyle='rgba(232,255,244,'+(0.85*b.life)+')';
-      g.lineWidth=Math.max(1,b.r*b.life); g.lineCap='round';
+      g.strokeStyle='rgba(255,255,255,'+(0.95*Math.min(1,b.life))+')';
+      g.lineWidth=Math.max(1.2,b.r*Math.min(1,b.life)); g.lineCap='round';
       g.beginPath(); g.moveTo(-b.len/2,0); g.lineTo(b.len/2,0); g.stroke();
       g.restore(); continue;
     }
