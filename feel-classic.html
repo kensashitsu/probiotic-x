@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v86 (07-29 16:22)';
+const BUILD='v87 (07-29 16:36)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -414,8 +414,16 @@ function updateZoom(dt){
 function camMaxX(){ return Math.max(0, worldW()-viewW()); }
 function camMaxY(){ return Math.max(0, worldBot()+BOT_PAD-viewH()); }
 function clampCam(){
-  cam.x=Math.max(0,Math.min(camMaxX(),cam.x));
-  cam.y=Math.max(0,Math.min(camMaxY(),cam.y));
+  const nx=Math.max(0,Math.min(camMaxX(),cam.x));
+  const ny=Math.max(0,Math.min(camMaxY(),cam.y));
+  // ★世界の端に押し付けている間は速度を殺す（壁にぶつかったら止まる、が正しい）。
+  //   これが無いと、実際には1pxも動いていないのに camVel が最大のまま残り続け、
+  //   「毎秒1300pxで疾走中」と誤判定されてオーラが点きっぱなしになる。
+  //   さらに指を戻した瞬間にその溜まった速度で飛び出す＝これが「暴走」の正体。
+  //   実測：端に着いてから5秒間、指を17px/sしか動かしていないのに camVel=1300・オーラ0.99
+  if(nx!==cam.x) camVel.x=0;
+  if(ny!==cam.y) camVel.y=0;
+  cam.x=nx; cam.y=ny;
 }
 // ★カメラは「指の画面上の速度」だけで決める。
 //   ここが要点：先頭の世界速度から決めると、カメラが動く→先頭が進む→
