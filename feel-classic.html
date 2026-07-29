@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v87 (07-29 16:36)';
+const BUILD='v88 (07-29 16:50)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -388,6 +388,31 @@ function worldW(){ return W*WORLD; }
 function worldBot(){ return PLAY_TOP + (playBot()-PLAY_TOP)*WORLD; }
 function playArea(){ return worldW()*Math.max(120, worldBot()-PLAY_TOP); }
 let cam={x:0,y:0};
+// ★「先が見えない」問題。先頭は必ず指の画面位置に居るので、走るために指を端へ押し出すと
+//   先頭も端に来てしまい、進行方向に残る余白は実測4px（画面の1%）＝ぶつかってから気づく。
+//   走っている間だけ視界を進行方向へずらして、先頭を画面の手前に引き戻す。
+//   ズーム（引く）はユーザー評「酔う」で却下済みなので、平行移動で稼ぐ
+const LEAD_K=+(_q.get('lead')||0.30);     // 画面幅に対する先読みの最大量（0で無効）
+const WARN_OUT=+(_q.get('warn')||190);    // 画面外どれだけまでの敵を縁に出すか(px)。0で無効
+const WARN_N=+(_q.get('warnn')||14);      // 一度に出す印の数
+const LEAD_SM=+(_q.get('leadsm')||3.2);   // 追従の速さ（大きいほど機敏／酔いやすい）
+let lead={x:0,y:0};
+function viewX(){ return cam.x+lead.x; }
+function viewY(){ return cam.y+lead.y; }
+function updLead(dt){
+  const sp=Math.hypot(camVel.x,camVel.y);
+  let tx=0, ty=0;
+  if(LEAD_K>0 && sp>40){
+    const t=Math.min(1, sp/PAN_MAX);            // 流れている勢いに比例
+    const amt=LEAD_K*Math.min(W,900)*t;
+    tx=camVel.x/sp*amt; ty=camVel.y/sp*amt*0.72;   // 縦は控えめ（盤面が薄いので）
+  }
+  const k=Math.min(1, dt*LEAD_SM);
+  lead.x+=(tx-lead.x)*k; lead.y+=(ty-lead.y)*k;
+  // 世界の外を見せない（端では先読みしても意味が無い）
+  lead.x=Math.max(-cam.x, Math.min(camMaxX()-cam.x, lead.x));
+  lead.y=Math.max(-cam.y, Math.min(camMaxY()-cam.y, lead.y));
+}
 // ※動的ズーム（疾走中だけ画面を引く）は試したが却下。ユーザー評「酔う」。
 //   既定は無効(1)。?zoom=0.8 のように指定すれば試せるが、常用はしない
 const ZOOM_MIN=Math.max(0.5, Math.min(1, +(_q.get('zoom')||1)));
@@ -481,7 +506,7 @@ function feedDir(nx,ny){
   }
   dirRef.ang=ang; dirRef.x=nx; dirRef.y=ny; dirRef.t=clock;
 }
-const FLOW_K=0.50;        // 指の速度のうち、どれだけ世界を流すか（位置による分に上乗せ）
+const FLOW_K=+(new URLSearchParams(location.search).get('flow')||0.50);  // 指の速度のうち、どれだけ世界を流すか（位置による分に上乗せ）
 const FLOW_MIN=230;       // これ以下の速さでは流れない。輪を描く操作(毎秒150〜200px程度)で
                           // 流れてしまうと形が崩れるので、疾走と明確に分ける
 // ★スクロールは「画面中央を過ぎたらすぐ」始まる。中央からの距離に比例して加速し、
@@ -565,7 +590,7 @@ function followCam(dt){
   clampCam();
 }
 function inView(x,y,m){ m=m||60;
-  return x>cam.x-m && x<cam.x+viewW()+m && y>cam.y-m && y<cam.y+viewH()+m; }
+  return x>viewX()-m && x<viewX()+viewW()+m && y>viewY()-m && y<viewY()+viewH()+m; }
 // ★上限が必須。マップは画面の3倍なので、面積＝画面サイズの二乗で効く。
 //   1920x1080のPCだと片側約1000匹・上限9000匹になり、描画が追いつかず固まる（実際に発生）。
 //   スマホ(375x667)は100匹。密度は保ちつつ、総数だけ頭打ちにする
@@ -712,7 +737,7 @@ function scatter(){
   }
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
-  cam={x:0,y:0}; clampCam();
+  cam={x:0,y:0}; lead={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
@@ -1685,7 +1710,7 @@ function loop(ts){
   // resume は非同期なので、実際に running になった瞬間を拾って合図を鳴らす
   if(!chimed && A && A.state==='running'){ chimed=true; acUnlocked=true; startChime(); }
   updSndBtn();
-  followCam(dt); updateZoom(dt);
+  followCam(dt); updLead(dt); updateZoom(dt);
   if(dragging){
     // ★指を止めたままでもカメラは流れる。先頭は毎フレーム「指の画面位置＋カメラ」で
     //   引き直す。これが無いと先頭だけ世界に取り残されて画面外へ消える
@@ -1968,7 +1993,7 @@ function loop(ts){
   const bg=g.createRadialGradient(W/2,H*0.45,60,W/2,H*0.45,Math.max(W,H)*0.8);
   bg.addColorStop(0,'#12202a'); bg.addColorStop(1,'#0b0f14'); g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
 
-  g.scale(zoom,zoom); g.translate(-cam.x,-cam.y);   // ここから世界座標（ズーム込み）
+  g.scale(zoom,zoom); g.translate(-viewX(),-viewY());   // ここから世界座標（ズーム込み・先読み込み）
   // 世界の縁（どこまで行けるか分かるように薄く）
   g.strokeStyle='rgba(120,200,180,.10)'; g.lineWidth=2;
   g.strokeRect(0,PLAY_TOP,worldW(),worldBot()-PLAY_TOP);
@@ -2275,8 +2300,8 @@ function loop(ts){
     // ★指は物理的に8〜10mm＝55〜64px を覆う。30pxでは指の下に隠れるので離す。
     //   画面上端に近い時は指の下側に回す
     const br=17;
-    const bx=Math.max(cam.x+br/zoom+4, Math.min(cam.x+viewW()-br/zoom-4, head.x));
-    const by=(head.y-56 < cam.y+(br+50)/zoom)? head.y+56 : head.y-56;
+    const bx=Math.max(viewX()+br/zoom+4, Math.min(viewX()+viewW()-br/zoom-4, head.x));
+    const by=(head.y-56 < viewY()+(br+50)/zoom)? head.y+56 : head.y-56;
     g.save();
     g.beginPath(); g.arc(bx,by,br,0,7);
     g.fillStyle='rgba(6,14,12,.82)'; g.fill();
@@ -2289,6 +2314,35 @@ function loop(ts){
   }
 
   g.restore(); // 世界座標ここまで＋画面揺れ
+
+  // ★画面のすぐ外にいる腐敗菌を、縁の印で知らせる。
+  //   先読みカメラで余白は稼いだが、それでも全速なら0.1秒ぶんしか見えない。
+  //   「そこに居る」が分かれば、ぶつかってから気づく事故は減る
+  if(WARN_OUT>0){
+    const near=[];
+    for(const f of foes){
+      if(f.dead) continue;
+      const sx=(f.x-viewX())*zoom, sy=(f.y-viewY())*zoom;
+      if(sx>=0 && sx<=W && sy>=PLAY_TOP && sy<=H) continue;          // 画面内は不要
+      const cx=Math.max(14, Math.min(W-14, sx)), cy=Math.max(PLAY_TOP+14, Math.min(H-14, sy));
+      const d=Math.hypot(sx-cx, sy-cy);
+      if(d>WARN_OUT) continue;
+      near.push({cx,cy,d,ax:sx-cx,ay:sy-cy});
+    }
+    near.sort((a,b)=>a.d-b.d);
+    g.save();
+    for(let i=0;i<near.length && i<WARN_N;i++){
+      const o=near[i], t=1-o.d/WARN_OUT;
+      const ang=Math.atan2(o.ay,o.ax);
+      g.globalAlpha=0.20+0.55*t;
+      g.fillStyle='#ff8fb4';
+      g.translate(o.cx,o.cy); g.rotate(ang);
+      const r=3.2+3.4*t;
+      g.beginPath(); g.moveTo(r*1.5,0); g.lineTo(-r*0.7,r*0.85); g.lineTo(-r*0.7,-r*0.85); g.closePath(); g.fill();
+      g.setTransform(DPR,0,0,DPR,0,0);
+    }
+    g.restore();
+  }
 
   // ミニマップ：広い世界のどこに何が居るかを把握する。タップで開閉できる
   {
@@ -2324,7 +2378,7 @@ function loop(ts){
       }
       // 今見えている範囲
       g.strokeStyle='rgba(200,255,230,.4)'; g.lineWidth=1;
-      g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, viewW()*sx, Math.min(mh, viewH()*sy));
+      g.strokeRect(mx+viewX()*sx, my+Math.max(0,viewY()-PLAY_TOP)*sy, viewW()*sx, Math.min(mh, viewH()*sy));
       g.restore();
     }
   }
