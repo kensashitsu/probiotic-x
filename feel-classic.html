@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v84 (07-29 16:04)';
+const BUILD='v85 (07-29 16:15)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -440,6 +440,22 @@ const ACC_COAST=+(_q.get('coast')||0.8);// 指を戻した後の惰性（小さ�
 const ACC_BRAKE=14; // 曲がった時の制動（囲みのために素早く止める）
 let dirRef={x:0,y:0,ang:null,t:0};   // 旋回を測る基準点（指の実移動から求める）
 const TURN_LO=2.0, TURN_HI=6.0;      // 旋回の速さ(rad/秒)。これ以上でスクロールを止める
+// ★「小さく巻いている＝囲もうとしている」を、指のジェスチャだけで見る。
+//   旋回半径をこれまで頭の速さから出していたが、頭の速さにはカメラの流れ込みが乗る。
+//   PCの広い画面では中心から離れるだけで camVel が1000超になり、
+//   半径70pxの円を描いていても「半径554pxで疾走中」と誤判定してオーラが暴走していた（実測）。
+//   指の速さ÷旋回の速さなら、画面のどこで描いても同じ判定になる
+const GEST_MIN=+(_q.get('gmin')||60);     // これ以下は「指が止まっている」＝曲がっていない扱い
+const LOOP_R0=+(_q.get('loop0')||120);    // この半径以下は完全に「巻いている」
+const LOOP_R1=+(_q.get('loop1')||320);    // これ以上は「進んでいる」
+const TURN_MIN=+(_q.get('tmin')||1.0);    // これ以下しか曲がっていなければ「巻いていない」
+function gestureR(){
+  const gs=Math.hypot(fingerVel.x,fingerVel.y);
+  // 止めている間・ほとんど曲がっていない間は「巻いていない」。
+  // ここで下限(0.6)割りをすると、ゆっくり直進しただけで半径が小さく出てしまう
+  if(gs<=GEST_MIN || turnRate<TURN_MIN) return 9999;
+  return gs/turnRate;
+}
 // 指が実際に動いた分から旋回の速さを求める。平滑化した速度から向きを出すと
 // フレームとタッチイベントのタイミングずれで鈍り、旋回を検出できない
 function feedDir(nx,ny){
@@ -490,7 +506,11 @@ function followCam(dt){
   //   流れない＝囲みの取りこぼしが起きない。まっすぐ走り出した時だけ流れる。
   //   これが無いとストローク開始の一瞬で数十px流れ、輪が閉じなくなる
   // 曲がっている時だけ止める。速度で門をかけると端に押し付けて流せなくなる
-  const st=1-Math.min(1,Math.max(0,(turnRate-TURN_LO)/(TURN_HI-TURN_LO)));
+  // 旋回の速さ／指のジェスチャ半径のどちらかが「巻いている」と言えば止める
+  const stT=1-Math.min(1,Math.max(0,(turnRate-TURN_LO)/(TURN_HI-TURN_LO)));
+  const gr=gestureR();
+  const stR=Math.min(1,Math.max(0,(gr-LOOP_R0)/(LOOP_R1-LOOP_R0)));
+  const st=Math.min(stT, stR);
   // 曲がり始めは即座に止め、直進に戻る時はゆっくり戻す（囲みの取りこぼしを防ぐ）
   straight+=(st-straight)*Math.min(1, dt*(st<straight? 30:5));
 
@@ -1682,7 +1702,11 @@ function loop(ts){
     //   半径で見れば、大きく曲がる（疾走の進路変更）＝纏ったまま、
     //   小さく巻き込む（輪を作る動き）＝解除、と両方成立する。
     //   巻き込み始めた瞬間に解除されるよう、狭まる側も素早く追従させる
-    const tr=headSpd/Math.max(0.6,turnRate);
+    // ★半径は指のジェスチャで測る（頭の速さで測るとカメラの流れ込みが乗り、
+    //   画面の端に寄っただけで「疾走中」になってしまう）。
+    //   指を止めている時だけは従来どおり頭の速さで見る＝惰性で流れている間も点く
+    const tr=(fspd>GEST_MIN && turnRate>=TURN_MIN)? fspd/turnRate
+                                                  : headSpd/Math.max(0.6,turnRate);
     turnR += (tr-turnR)*Math.min(1, dt*(tr>turnR? 18:16));
     const gate=Math.max(0,Math.min(1,(turnR-TURN_R_LO)/(TURN_R_HI-TURN_R_LO)));
     // 触った直後の一瞬は出さない。ここで点くと最初の1匹が拾えず、
