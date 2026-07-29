@@ -174,7 +174,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v95 (07-30 07:21)';
+const BUILD='v96 (07-30 07:27)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1255,10 +1255,21 @@ function auraBurst(){
     if(!burstSeen){ burstSeen=true; tipMsg('連鎖を弾いた！ ただし纏っている間は囲えない'); }
   }
 }
+// ★ぶつかった時に失う割合。全損は罰が重すぎる（鎖は数十秒かけて育てる資源で、
+//   しかも衝突が残るのは盤面が止まっている＝囲っている最中）。既定は半分。
+//   ちぎれるのは尻尾側で、先頭から繋がった分はそのまま残る＝見た目が破綻しない
+const SHATTER_LOSE=Math.max(0,Math.min(1,+(_q.get('lose')||0.5)));
 function shatter(ox,oy){
-  const joined=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
-  if(joined.length===0){ // 空の鎖でも軽い弾き
+  const all=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
+  if(all.length===0){ // 空の鎖でも軽い弾き
     hitCd=0.25; shake=Math.max(shake,4); breakSnd(0); return; }
+  // 尻尾側から失う。1匹しか繋いでいない時は全部（半分にできない）
+  let nLose=Math.round(all.length*SHATTER_LOSE);
+  if(SHATTER_LOSE>=1) nLose=all.length;
+  else if(all.length<=1) nLose=all.length;
+  else nLose=Math.max(1, Math.min(all.length, nLose));
+  const joined=all.slice(0,nLose);      // 飛び散る分（尻尾側）
+  const keep=all.slice(nLose);          // 残る分（先頭側）
   // ★全部バラバラにはしない。ランダムな長さの塊のまま飛び散る方が、
   //   拾い直しに変化が出るし、ちぎれた鎖という見た目にも合う
   const SIZES=[1,1,1,2,2,3,4];
@@ -1283,10 +1294,14 @@ function shatter(ox,oy){
     }
   }
   shards.push({x:ox,y:oy,life:1});
-  joinedCount=0; orderSeq=0;
+  // 残った分は番号を詰め直して繋がったままにする
+  orderSeq=0;
+  for(const r of keep) r.order=orderSeq++;
+  joinedCount=keep.length;
   hitCd=0.45; shake=Math.max(shake, 6+Math.min(joined.length,12));
   breakSnd(joined.length);
-  tipMsg('雑菌に触れると鎖が弾ける！ 触れずに囲め');
+  tipMsg(keep.length? '雑菌に触れると鎖の半分がちぎれる！ 触れずに囲め'
+                    : '雑菌に触れると鎖が弾ける！ 触れずに囲め');
 }
 
 cv.addEventListener('mousedown',e=>{ac(); isMouse=true; const p=pos(e);
