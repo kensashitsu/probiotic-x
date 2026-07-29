@@ -123,6 +123,14 @@
   body.short #ready .rs{font-size:11.5px;margin-top:7px;line-height:1.65}
   body.short #go{margin-top:11px;font-size:15px;padding:9px 26px}
   body.short #ready .rn{margin-top:8px;font-size:10px}
+  /* ★縦画面は幅375pxしかないので、HUDの1行が折り返してしまう（🔊ボタンを足した分）。
+     折り返さないよう詰め、累計の「溶かした」だけ省く（決着画面で出るので live では不要） */
+  @media (orientation:portrait){
+    #nums{gap:8px}
+    #nums>*{white-space:nowrap}
+    #nums .s3{display:none}
+    #sndbtn{margin-left:auto}
+  }
   /* ホーム画面に追加すればバーごと消える。スタンドアロン起動中は出さない */
   #a2hs{display:none} body.nostandalone #a2hs{display:block}
 </style>
@@ -166,7 +174,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v92 (07-29 17:24)';
+const BUILD='v93 (07-30 06:21)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -189,7 +197,7 @@ const elOver=document.getElementById('over'), elOverT=document.getElementById('o
 let W,H,DPR,portrait=false;
 // ============================================================
 //  ★画面の向きの方針は、この1行を書き換えるだけで戻せる
-//    'land' = 横専用（今の既定）／ 'free' = どちらでも遊べる ／ 'port' = 縦専用
+//    'port' = 縦専用（今の既定）／ 'free' = どちらでも遊べる ／ 'land' = 横専用
 //  URLでも切り替えられる（そのまま記憶されるので、ホーム画面から起動しても効く）：
 //    ?orient=free  … 向きの制限をやめる
 //    ?orient=port  … 縦専用に戻す
@@ -197,13 +205,15 @@ let W,H,DPR,portrait=false;
 //    ?orient=reset … 記憶を消して、下の既定に従わせる
 //  盤面の余白は向きに合わせて自動で切り替わるので、どれを選んでもレイアウトは崩れない
 // ============================================================
-const ORIENT_DEFAULT='land';
+const ORIENT_DEFAULT='port';   // 横で一通り試した上で、縦に戻すという判断
 let ORIENT=ORIENT_DEFAULT;
 try{
+  // ★キーを orient2 に変えている。既定を横→縦に変えたので、以前 'land' を記憶した端末が
+  //   そのまま横のままになるのを避けるため（古い 'orient' は無視する）
   const q=new URLSearchParams(location.search).get('orient');
-  if(q==='reset') localStorage.removeItem('orient');
-  else if(q==='land'||q==='free'||q==='port'){ ORIENT=q; localStorage.setItem('orient',q); }
-  else { const sv=localStorage.getItem('orient');
+  if(q==='reset'){ localStorage.removeItem('orient2'); localStorage.removeItem('orient'); }
+  else if(q==='land'||q==='free'||q==='port'){ ORIENT=q; localStorage.setItem('orient2',q); }
+  else { const sv=localStorage.getItem('orient2');
          if(sv==='land'||sv==='free'||sv==='port') ORIENT=sv; }
 }catch(e){}
 // 旧来の ?portrait=1 は「どちらでも」の別名として残す
