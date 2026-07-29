@@ -83,7 +83,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v65 (07-29 12:10)';
+const BUILD='v66 (07-29 13:02)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -790,21 +790,51 @@ function finishGame(win,how){
   }
   elOver.classList.add('show');
 }
-// 鎖を後ろから使う（払った分だけ離脱。死なずにその場へ漂う）
+// ★鎖を後ろから使う。使った桿菌は【砕けて消える＝不可逆】。盤面に戻らないので味方の数も減る。
+//   結果、1回の封印で2匹以上溶かさないと収支がマイナスになり、
+//   「まとめて大きく囲う」が数字として得になる
 function spendChain(n){
   const line=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);   // 尻尾から
   const cost=Math.min(n, line.length);
   for(let i=0;i<cost;i++){
     const r=line[i];
-    r.joined=false; r.order=0; r.b=null; r.doom=0;
-    r.spent=SPENT_T;                     // 少しの間は酸を出し切っていて拾えない
-    const a=rnd(0,6.283), sp=rnd(1.4,3.0);
-    r.vx=Math.cos(a)*sp; r.vy=Math.sin(a)*sp; r.vr=rnd(-0.5,0.5);
+    r.joined=false; r.dead=true;                 // 消える
+    if(r.link&&r.link.next===r) r.link.next=null;
+    if(r.next) r.next.link=null;
+    r.link=null; r.next=null;
+    shatterBits(r.x,r.y,r.ang);
     joinedCount--;
   }
+  if(cost>0) crackSnd();
   const rest=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
   orderSeq=0; for(const r of rest) r.order=orderSeq++;
 }
+// 砕ける破片（丸い粒ではなく、割れた棒切れに見せる）
+function shatterBits(x,y,ang){
+  for(let i=0;i<7;i++){
+    const a=(ang||0)+rnd(-0.9,0.9), sp=rnd(1.4,4.2);
+    bits.push({x:x+rnd(-2,2), y:y+rnd(-2,2),
+      vx:Math.cos(a)*sp*rnd(-1,1.4), vy:Math.sin(a)*sp*rnd(-1,1.4)-0.6,
+      life:1, r:rnd(1.0,2.2), len:rnd(2.5,6.5)*SCALE, ang:a, spin:rnd(-0.5,0.5), white:1});
+  }
+  bits.push({x:x, y:y, life:1, r:1, flash:1});
+}
+function crackSnd(){ if(!A)return; try{
+  const t=A.currentTime, dur=0.13;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate);
+  const ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e*e*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const hp=A.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=1800;
+  const gg=A.createGain(); gg.gain.setValueAtTime(0.11,t);
+  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(hp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+  const o=A.createOscillator(), og=A.createGain();
+  o.type='square'; o.frequency.setValueAtTime(900,t); o.frequency.exponentialRampToValueAtTime(260,t+0.09);
+  og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.05,t+0.006);
+  og.gain.exponentialRampToValueAtTime(0.0001,t+0.10);
+  o.connect(og).connect(A.destination); o.start(t); o.stop(t+0.12);
+}catch(e){} }
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
 function updateHud(){
   elCnt.textContent=totalSealed;
@@ -1660,7 +1690,24 @@ function loop(ts){
 
   // 溶けカス
   for(const b of bits){ b.x+=b.vx; b.y+=b.vy; b.vy+=0.06; b.life-=dt*1.6;
-    if(b.life>0){ g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7); g.fillStyle='rgba(160,245,200,'+(0.7*b.life)+')'; g.fill(); } }
+    if(b.life<=0) continue;
+    if(b.flash){                              // 砕けた瞬間の閃光
+      const k=b.life*b.life;
+      g.beginPath(); g.arc(b.x,b.y,(1-b.life)*22+3,0,7);
+      g.strokeStyle='rgba(230,255,245,'+(0.7*k)+')'; g.lineWidth=1+3*k; g.stroke();
+      continue;
+    }
+    if(b.len){                                // 割れた棒切れ
+      b.ang+=(b.spin||0);
+      g.save(); g.translate(b.x,b.y); g.rotate(b.ang);
+      g.strokeStyle='rgba(232,255,244,'+(0.85*b.life)+')';
+      g.lineWidth=Math.max(1,b.r*b.life); g.lineCap='round';
+      g.beginPath(); g.moveTo(-b.len/2,0); g.lineTo(b.len/2,0); g.stroke();
+      g.restore(); continue;
+    }
+    g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7);
+    g.fillStyle= b.white? 'rgba(235,255,246,'+(0.8*b.life)+')' : 'rgba(160,245,200,'+(0.7*b.life)+')';
+    g.fill(); }
   bits=bits.filter(b=>b.life>0);
 
   // 鎖の目標（順序のみ。位置は下でバネ計算する）
