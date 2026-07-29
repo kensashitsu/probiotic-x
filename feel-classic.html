@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v90 (07-29 17:01)';
+const BUILD='v91 (07-29 17:18)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -404,7 +404,45 @@ let lead={x:0,y:0};
 //   動くのは先頭だけなので、視界の流れは今までと同じ
 function viewX(){ return cam.x; }
 function viewY(){ return cam.y; }
+// ★★ ?mix=1：移動は相対・囲むは絶対のハイブリッド ★★
+//   囲む時に要るのは「形」であって絶対位置ではない。指と先頭が一定量ずれていても、
+//   そのずれが動かなければ、描いた輪の形はそのまま先頭が描く＝なぞりの精度は1:1のまま。
+//   移動中は精度が要らないので、その間だけ先頭を画面中央へ寄せていく（＝スティック操作）。
+//   囲む動きに入った瞬間にずれを固定するので、狙っている最中に勝手に動かない。
+//   走っている／巻いているの判定は v85 で作った「指のジェスチャ半径」をそのまま使う
+const MIX=(_q.get('mix')==='1');
+const MIX_RATE=+(_q.get('mixr')||620);    // 先頭が中央へ寄っていく速さ(px/秒)
+const MIX_SP=+(_q.get('mixsp')||150);     // これ以上流れていたら「移動中」
+const MIX_EDGE=+(_q.get('mixe')||200);    // 指が画面端に張り付いた時にずれを戻す速さ(px/秒)
+let mixSteer=false;
 function updLead(dt){
+  if(MIX){
+    if(!dragging){ lead.x=0; lead.y=0; mixSteer=false; return; }
+    // 移動中＝カメラが流れていて、かつ小さく巻いていない
+    mixSteer = (Math.hypot(camVel.x,camVel.y)>MIX_SP) && straight>0.5 && gestureR()>LOOP_R1;
+    if(mixSteer){
+      // 先頭が画面中央に来るようにずれを育てる（世界は動かさない＝酔わない）
+      const tx=finger.x-W/2, ty=finger.y-(PLAY_TOP+H)/2;
+      const r=MIX_RATE*dt;
+      lead.x+=Math.max(-r,Math.min(r,tx-lead.x));
+      lead.y+=Math.max(-r,Math.min(r,ty-lead.y));
+    }
+    else {
+      // 巻いている最中に指が画面の端に張り付いてしまうと、その先へ動かせなくなる。
+      // 「本当に張り付いている時だけ」逃げ道を作る。近いだけで効かせると、
+      // 端の近くで囲んでいる最中にずれが動いて形が崩れる（実測で確認）
+      const m=14, r2=MIX_EDGE*dt;
+      if(finger.x>W-m   && lead.x>0) lead.x=Math.max(0,lead.x-r2);
+      if(finger.x<m     && lead.x<0) lead.x=Math.min(0,lead.x+r2);
+      if(finger.y>H-m   && lead.y>0) lead.y=Math.max(0,lead.y-r2);
+      if(finger.y<PLAY_TOP+m && lead.y<0) lead.y=Math.min(0,lead.y+r2);
+    }
+    // 巻いている間は固定。ここが「囲むは絶対」＝指の動きがそのまま先頭の形になる
+    const lx=W*0.46, ly=Math.max(60,(H-PLAY_TOP))*0.42;
+    lead.x=Math.max(-lx,Math.min(lx,lead.x));
+    lead.y=Math.max(-ly,Math.min(ly,lead.y));
+    return;
+  }
   const sp=Math.hypot(camVel.x,camVel.y);
   let tx=0, ty=0;
   if(LEAD_K>0 && sp>40){
@@ -806,6 +844,7 @@ function start(x,y){
   straight=0; turnRate=0; strokeT0=clock; camVel.x=0; camVel.y=0;
   dirRef={x:finger.x, y:finger.y, ang:null, t:clock};
   auraPF.x=finger.x; auraPF.y=finger.y; aura=0; auraTail=0; headSpd=0; parkT=0; camW=1;
+  if(MIX){ lead.x=0; lead.y=0; }   // 触った所が先頭＝掴み直しは素直に
   ac(); catchNear(x,y);
 }
 function moveTo(x,y){
@@ -2403,6 +2442,7 @@ function loop(ts){
     g.fillText('音 '+(A? A.state:'未作成')+(acUnlocked?' 解錠':' 未解錠')
       +' 再生'+sndPlays+(acErr?' '+acErr:''), 14, H-90);
     g.fillStyle= aura>0.35? '#9be8ff':'#bfe9d2';
+    if(MIX) g.fillText((mixSteer?'移動(相対)':'囲む(絶対)')+'  ずれ'+Math.round(Math.hypot(lead.x,lead.y))+'px', 200, H-20);
     g.fillText('速さ '+Math.round(headSpd)+' px/s  流れ'+camW.toFixed(2)
       +(parkT>0.05?'  止'+parkT.toFixed(1)+'s':''), 14, H-72);
     g.fillText('オーラ '+aura.toFixed(2)+(aura>0.35?'  ON':(auraTail>0?'  余韻'+auraTail.toFixed(2):'  off')), 14, H-54);
