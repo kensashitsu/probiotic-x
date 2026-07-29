@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v56 (07-29 10:53)';
+const BUILD='v57 (07-29 11:01)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -130,7 +130,7 @@ const PULL_V=+(_q.get('pull')||150);          // 引き寄せの最大速度(px/
 // ★実際の大きさに合わせる。乳酸桿菌は約1×3.5µm、ブドウ球菌は直径約0.8〜1.0µm。
 //   つまり「球菌の直径 ≒ 桿菌の太さ」が正しい。以前は桿菌の太さの2〜3倍（ほぼ桿菌の長さ）
 //   もあって、実物よりかなり大きかった。?foer=1.6 のように倍率で見比べられる
-const CHAIN_MAX=+(_q.get('chain')||7);   // 連鎖の最大の長さ
+const CHAIN_MAX=+(_q.get('chain')||10);  // 連鎖の最大の長さ
 // ★疾走すると酸のオーラを纏う。触れた連鎖は弾け飛び、球菌は近くの仲間と繋がり直そうとする。
 //   間に合わなければ死滅＝数が減る。走る＝安全だが囲めない／囲む＝減速して危険、という
 //   緊張が生まれる。オーラの大きさは繋いだ数で決まる＝ここでも繋ぐ意味が出る
@@ -388,7 +388,10 @@ const STEAL_R=150;
 // ★桿菌の太さは5.3pxしかないので、くびれの"形"は物理的に見えない。
 //   ゆっくりにして、光と動き（伸びる→割れて飛び退く）で見せる
 const DIV_T=+(_q.get('divt')||1.15);   // 二分裂にかかる時間(秒)
-const ROD_CHAIN=+(_q.get('rchain')||5);  // 桿菌が連なる最大の長さ
+const ROD_CHAIN=+(_q.get('rchain')||8);  // 桿菌が連なる最大の長さ
+// ★分裂だけでなく、漂っている個体同士が近づいても繋がる（寄り集まって連鎖が育つ）
+const LINK_EVERY=0.15;                   // 判定の間隔(秒)。毎フレームは重い
+let linkT=0;
 const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
 const WIN_AT=0.94, LOSE_AT=0.06;
 const TIME_LIMIT=+(_q.get('time')||90);
@@ -507,6 +510,31 @@ function moveTo(x,y){
   if(sealCooldown<=0 && aura<=0.35) checkClose();   // 纏っている間は囲えない
 }
 function end(){ dragging=false; }
+// ---- 漂っている個体同士をくっつける ----
+// link = 自分の1つ前 ／ next = 自分の1つ後ろ。先頭は link が無く、末尾は next が無い。
+function chainHead(o){ let c=o,n=0; while(c.link&&!c.link.dead&&n++<64) c=c.link; return c; }
+function chainLen(o){ let c=chainHead(o),n=1; while(c.next&&!c.next.dead&&n<64){ c=c.next; n++; } return n; }
+function tryLink(list, cap, radius, ok){
+  const R=radius, cell=R*1.4, grid=new Map();
+  const key=(x,y)=>((x/cell)|0)+','+((y/cell)|0);
+  for(const o of list){ if(!ok(o)) continue;
+    const k=key(o.x,o.y); let a=grid.get(k); if(!a){ a=[]; grid.set(k,a); } a.push(o); }
+  for(const o of list){
+    if(!ok(o) || o.link) continue;                 // 自分は連鎖の先頭であること
+    const gx=(o.x/cell)|0, gy=(o.y/cell)|0;
+    let best=null, bd=R;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      const a=grid.get((gx+dx)+','+(gy+dy)); if(!a) continue;
+      for(const q of a){
+        if(q===o || !ok(q) || q.next) continue;    // 相手は連鎖の末尾であること
+        if(chainHead(q)===o) continue;             // 同じ連鎖＝輪になるので繋がない
+        if(chainLen(o)+chainLen(q)>cap) continue;
+        const d=Math.hypot(q.x-o.x,q.y-o.y); if(d<bd){ bd=d; best=q; }
+      }
+    }
+    if(best){ o.link=best; best.next=o; o.clen=(best.clen||0)+1; }
+  }
+}
 function unlinkRod(r){
   if(r.link && r.link.next===r) r.link.next=null;
   r.link=null; r.clen=0;
@@ -1339,6 +1367,15 @@ function loop(ts){
       const m=f.r+6;
       if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
       if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
+    }
+    // 近づいたもの同士を繋ぐ（分裂以外でも連鎖が育つ）
+    linkT-=dt;
+    if(linkT<=0){
+      linkT=LINK_EVERY;
+      tryLink(rods, ROD_CHAIN, RLEN*1.25,
+              r=>!r.joined && r.dying==null && !r.dead && !r.div && !(r.vx||r.vy) && !(r.doom>0));
+      tryLink(foes, CHAIN_MAX, FOE_R*3.2,
+              f=>!f.dead && f.sos==null && !f.div && !(f.vx||f.vy));
     }
     // 乳酸桿菌の連なりを保つ（拾われた／消えかけたら切れる）
     for(const r of rods){
