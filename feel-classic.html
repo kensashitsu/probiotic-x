@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v46 (07-29 09:33)';
+const BUILD='v47 (07-29 09:44)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -686,13 +686,25 @@ function auraBurst(){
   const R=auraR()*(0.6+0.4*aura), Rr=R*0.72;
   const chain=rods.filter(r=>r.joined);
   const reach=R + joinedCount*SPACING + 60;
+  let bursts=0;
   for(const f of foes){
     if(f.dead||f.sos!=null) continue;
-    if(!(f.link&&!f.link.dead) && !(f.next&&!f.next.dead)) continue;   // 単体は弾けない
     if(Math.hypot(f.x-head.x,f.y-head.y)>reach) continue;              // 遠いものは早々に除外
+    if(Math.abs(f.vx||0)>90||Math.abs(f.vy||0)>90) continue;           // 弾いた直後は再判定しない
     let touched=sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,R);
     if(!touched){ for(const r of chain){ if(foeDist(r.x,r.y,f)<Rr){ touched=true; break; } } }
     if(!touched) continue;
+    const linked=(f.link&&!f.link.dead)||(f.next&&!f.next.dead);
+    if(!linked){
+      // ★単体：弾き飛ばすだけ（元々繋がっていないので死滅はしない）
+      const a=Math.atan2(f.y-head.y, f.x-head.x)+rnd(-0.4,0.4);
+      const sp=rnd(240,430);
+      f.vx=Math.cos(a)*sp; f.vy=Math.sin(a)*sp;
+      for(let i=0;i<4;i++) bits.push({x:f.x,y:f.y,vx:rnd(-1,1),vy:rnd(-1,1),life:.5,r:rnd(.8,1.8)});
+      continue;
+    }
+    if(bursts>=3) continue;                                            // 1フレームに弾く連鎖は3本まで
+    bursts++;
     // その連鎖を全部たどって切り離す
     const list=[]; let cur=f;
     while(cur&&!cur.dead){ list.push(cur); cur=cur.link&&!cur.link.dead? cur.link:null; }
@@ -709,7 +721,6 @@ function auraBurst(){
     shake=Math.max(shake,3+Math.min(list.length,8));
     burstSnd(list.length);
     if(!burstSeen){ burstSeen=true; tipMsg('連鎖を弾いた！ ただし纏っている間は囲えない'); }
-    return;
   }
 }
 function auraOnSnd(){ if(!A)return; try{
@@ -1255,6 +1266,16 @@ function loop(ts){
           for(let i=0;i<10;i++) bits.push({x:f.x,y:f.y, vx:rnd(-1.2,1.2),vy:rnd(-1.5,0.4), life:1, r:rnd(1.4,3.2)});
         }
         continue;                                        // 通常の漂いはしない
+      }
+      // 弾き飛ばされた勢い（単体をオーラで押しのけた分）
+      if(f.vx||f.vy){
+        f.x+=f.vx*dt; f.y+=f.vy*dt;
+        const dmp=Math.pow(0.05,dt); f.vx*=dmp; f.vy*=dmp;
+        const mb=f.r+6;
+        if(f.x<mb){f.x=mb;f.vx*=-0.5;} else if(f.x>wx-mb){f.x=wx-mb;f.vx*=-0.5;}
+        if(f.y<PLAY_TOP+mb){f.y=PLAY_TOP+mb;f.vy*=-0.5;} else if(f.y>yb-mb){f.y=yb-mb;f.vy*=-0.5;}
+        if(Math.abs(f.vx)<4&&Math.abs(f.vy)<4){ f.vx=0; f.vy=0; }
+        continue;
       }
       f.wa+=Math.sin(clock*0.27+f.phase)*dt*0.8;
       const sp=FOE_DRIFT*f.ws;
