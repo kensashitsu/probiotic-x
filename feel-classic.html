@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v58 (07-29 11:08)';
+const BUILD='v59 (07-29 11:13)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -392,6 +392,10 @@ const ROD_CHAIN=+(_q.get('rchain')||8);  // 桿菌が連なる最大の長さ
 // ★分裂だけでなく、漂っている個体同士が近づいても繋がる（寄り集まって連鎖が育つ）
 const LINK_EVERY=0.15;                   // 判定の間隔(秒)。毎フレームは重い
 let linkT=0;
+// ★浮遊中の敵と味方がぶつかったら、互いに弾かれて連鎖から外れる。
+//   死滅はさせない（プレイヤーの操作と無関係に数が減ると腕前が結果に出なくなる）
+const BUMP_EVERY=0.08;
+let bumpT=0, bumpSndT=-9;
 const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
 const WIN_AT=0.94, LOSE_AT=0.06;
 const TIME_LIMIT=+(_q.get('time')||90);
@@ -535,6 +539,48 @@ function tryLink(list, cap, radius, ok){
     if(best){ o.link=best; best.next=o; o.clen=(best.clen||0)+1; }
   }
 }
+// 浮遊中の敵味方の衝突。近傍だけ見るため格子を使う
+function bumpAll(){
+  const cell=(RLEN*0.5+FOE_R*2+10);
+  const grid=new Map(); const key=(x,y)=>((x/cell)|0)+','+((y/cell)|0);
+  for(const f of foes){ if(f.dead||f.sos!=null) continue;
+    const k=key(f.x,f.y); let a=grid.get(k); if(!a){a=[];grid.set(k,a);} a.push(f); }
+  for(const r of rods){
+    if(r.joined||r.dying!=null||r.dead||r.div) continue;
+    if(Math.abs(r.vx)>2||Math.abs(r.vy)>2) continue;      // 既に飛んでいる間は判定しない
+    const gx=(r.x/cell)|0, gy=(r.y/cell)|0;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      const a=grid.get((gx+dx)+','+(gy+dy)); if(!a) continue;
+      for(const f of a){
+        if(Math.abs(f.vx||0)>60||Math.abs(f.vy||0)>60) continue;
+        const d=foeDist(r.x,r.y,f);
+        if(d>=RW*0.5+1) continue;
+        // 互いに反対方向へ弾かれ、連鎖からも外れる
+        const ang=Math.atan2(r.y-f.y, r.x-f.x);
+        unlinkRod(r); if(r.next){ unlinkRod(r.next); r.next=null; }
+        const rs=rnd(1.6,3.4);
+        r.vx=Math.cos(ang)*rs; r.vy=Math.sin(ang)*rs; r.vr=rnd(-0.5,0.5);
+        if(f.link&&f.link.next===f) f.link.next=null;
+        if(f.next) f.next.link=null;
+        f.link=null; f.next=null; f.clen=0;
+        const fs2=rnd(110,230);
+        f.vx=-Math.cos(ang)*fs2; f.vy=-Math.sin(ang)*fs2;
+        for(let i=0;i<4;i++) bits.push({x:(r.x+f.x)/2,y:(r.y+f.y)/2,
+          vx:rnd(-1.1,1.1),vy:rnd(-1.1,1.1),life:.45,r:rnd(.8,1.7)});
+        bumpSnd();
+        return;    // 1回の判定で1組だけ＝連鎖的に全部弾けるのを防ぐ
+      }
+    }
+  }
+}
+function bumpSnd(){ if(!A)return; if(clock-bumpSndT<0.12) return; bumpSndT=clock; try{
+  const t=A.currentTime, dur=0.05;
+  const o=A.createOscillator(), gg=A.createGain();
+  o.type='triangle'; o.frequency.setValueAtTime(320,t); o.frequency.exponentialRampToValueAtTime(180,t+dur);
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.03,t+0.006);
+  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(gg).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+}catch(e){} }
 function unlinkRod(r){
   if(r.link && r.link.next===r) r.link.next=null;
   r.link=null; r.clen=0;
@@ -1383,6 +1429,8 @@ function loop(ts){
       if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
       if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
     }
+    // 浮遊中の敵味方がぶつかったら互いに弾ける
+    bumpT-=dt; if(bumpT<=0){ bumpT=BUMP_EVERY; bumpAll(); }
     // 近づいたもの同士を繋ぐ（分裂以外でも連鎖が育つ）
     linkT-=dt;
     if(linkT<=0){
