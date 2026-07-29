@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v55 (07-29 10:41)';
+const BUILD='v56 (07-29 10:53)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -385,7 +385,10 @@ const GF=+(_q.get('gf')||0.016);   // 腐敗菌1匹あたりの分裂速度（/�
 const GA=+(_q.get('ga')||0.055);   // 乳酸菌1匹あたりの分裂速度（/秒）
 const STEAL_N=+(_q.get('steal')||1);   // 腐敗菌1回の分裂で奪う乳酸菌の数
 const STEAL_R=150;
-const DIV_T=+(_q.get('divt')||0.85);   // 二分裂にかかる時間(秒)
+// ★桿菌の太さは5.3pxしかないので、くびれの"形"は物理的に見えない。
+//   ゆっくりにして、光と動き（伸びる→割れて飛び退く）で見せる
+const DIV_T=+(_q.get('divt')||1.15);   // 二分裂にかかる時間(秒)
+const ROD_CHAIN=+(_q.get('rchain')||5);  // 桿菌が連なる最大の長さ
 const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
 const WIN_AT=0.94, LOSE_AT=0.06;
 const TIME_LIMIT=+(_q.get('time')||90);
@@ -452,7 +455,7 @@ function killAllyNear(x,y,R){
     if(r.joined||r.dying!=null) continue;
     const d=Math.hypot(r.x-x,r.y-y); if(d<bd){ bd=d; bi=i; } }
   if(bi<0) return false;
-  const r=rods[bi]; r.dying=0.35;
+  const r=rods[bi]; r.dying=0.35; unlinkRod(r); if(r.next){ unlinkRod(r.next); r.next=null; }
   // どの腐敗菌が奪ったのかを見せる（今まで裏で消えていて、何が起きたか分からなかった）
   let nf=null, nd=1e9;
   for(const f of foes){ if(f.dead) continue;
@@ -504,6 +507,10 @@ function moveTo(x,y){
   if(sealCooldown<=0 && aura<=0.35) checkClose();   // 纏っている間は囲えない
 }
 function end(){ dragging=false; }
+function unlinkRod(r){
+  if(r.link && r.link.next===r) r.link.next=null;
+  r.link=null; r.clen=0;
+}
 function catchNear(x,y){
   // ★酸を纏っている間は拾えない。走りながら無限に伸ばせると無双になってしまう。
   //   「減速して集める → 加速して薙ぎ払う → 減速して囲む」という切り替えを作る
@@ -519,6 +526,7 @@ function catchNear(x,y){
     if(inAmmonia(r.x,r.y)) continue; // 靄の中は酸が中和されていて繋げない
     if(Math.hypot(r.x-x,r.y-y)<=CATCH_R){
       r.joined=true; r.order=orderSeq++; joinedCount++;
+      unlinkRod(r); if(r.next){ unlinkRod(r.next); r.next=null; }
       r.doom=0; r.vx=0; r.vy=0; r.vr=0;   // 救出＝餓死タイマー解除
       r.follow=0.30; r.b=null;             // 吸い付く瞬間だけ滑り込む／軌跡上の位置は初期化
       pop(joinedCount);
@@ -727,6 +735,15 @@ function auraBurst(){
     if(!burstSeen){ burstSeen=true; tipMsg('連鎖を弾いた！ ただし纏っている間は囲えない'); }
   }
 }
+let divSndT=-9;
+function divSnd(){ if(!A)return; if(clock-divSndT<0.16) return; divSndT=clock; try{
+  const t=A.currentTime, dur=0.07;
+  const o=A.createOscillator(), gg=A.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(1500,t); o.frequency.exponentialRampToValueAtTime(2300,t+dur);
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.022,t+0.008);
+  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(gg).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+}catch(e){} }
 function auraOnSnd(){ if(!A)return; try{
   const t=A.currentTime, dur=0.20;
   const o=A.createOscillator(), gg=A.createGain();
@@ -910,12 +927,18 @@ let tms=0;
 function drawRod(x,y,ang,joined,alpha,weak,divp){
   alpha=alpha==null?1:alpha; divp=divp||0;
   g.save(); g.translate(x,y); g.rotate(ang); g.globalAlpha=alpha;
+  // 分裂中は光って目立たせる（小さいので形では見えない）
+  if(divp>0){
+    const t=divp<0.62? divp/0.62 : 1;
+    g.shadowColor='rgba(190,255,225,'+(0.5+0.5*t)+')'; g.shadowBlur=6+10*t;
+  }
   // ★酸を纏っている間は列そのものが青白く帯電して見える＝オン/オフが一目で分かる
   const armed = joined && aura>0.35;
   if(joined){ g.shadowColor= armed? 'rgba(150,240,255,.95)':'rgba(140,240,200,.9)';
               g.shadowBlur= armed? 16:10; }
+  if(divp>0.62) g.fillStyle='#f2fffa';   // 割れた直後は白く光る
   // weak=餓死しかけ＝退色（乳白→くすんだ灰）
-  g.fillStyle= armed? '#eafcff' : (joined? '#c8ffe6' : (weak? '#9aa0a0' : '#dfeef0'));
+  g.fillStyle= armed? '#eafcff' : (joined? '#c8ffe6' : (divp>0? '#eefff8' : (weak? '#9aa0a0' : '#dfeef0')));
   g.strokeStyle= armed? 'rgba(150,235,255,1)' : (joined? 'rgba(120,235,190,.9)':'rgba(120,150,160,.5)');
   g.lineWidth= armed? 1.4:1;
   if(PLAYER_SHAPE==='cocci'){
@@ -1213,13 +1236,23 @@ function loop(ts){
       if(r.div>=1){
         r.div=0;
         const d=RLEN*0.81;
-        rods.push({x:Math.max(24,Math.min(worldW()-24,r.x+Math.cos(r.ang)*d)),
+        const nr={x:Math.max(24,Math.min(worldW()-24,r.x+Math.cos(r.ang)*d)),
                    y:Math.max(PLAY_TOP,Math.min(worldBot(),r.y+Math.sin(r.ang)*d)),
                    ang:r.ang, joined:false, order:0, phase:Math.random()*6.28,
                    vx:0,vy:0,vr:0, doom:0, spent:0, dead:false, born:clock,
-                   wa:r.wa+rnd(-.8,.8), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
+                   wa:r.wa+rnd(-.8,.8), ws:rnd(.55,1.45), spin:rnd(-.22,.22)};
+        // ★分かれた後も繋がったまま連なる（乳酸桿菌は数個〜十数個の連鎖・柵状になる）
+        if((r.clen||0)<ROD_CHAIN && !(r.next&&!r.next.dead)){
+          nr.link=r; r.next=nr; nr.clen=(r.clen||0)+1;
+        }
+        rods.push(nr);
         r.x-=Math.cos(r.ang)*d; r.y-=Math.sin(r.ang)*d;
-        if(!divSeen){ divSeen=true; tipMsg('乳酸菌は真ん中でくびれて2つに分かれる＝二分裂'); }
+        // 割れた瞬間の閃光と粒（小さくても「今2つになった」が分かるように）
+        shards.push({x:(r.x+Math.cos(r.ang)*d), y:(r.y+Math.sin(r.ang)*d), life:1, good:true, small:true});
+        for(let i=0;i<5;i++) bits.push({x:r.x+Math.cos(r.ang)*d*0.5, y:r.y+Math.sin(r.ang)*d*0.5,
+          vx:rnd(-.9,.9), vy:rnd(-.9,.9), life:.55, r:rnd(.9,1.8)});
+        divSnd();
+        if(!divSeen){ divSeen=true; tipMsg('乳酸菌は伸びて真ん中に隔壁ができ、2つに分かれる＝二分裂'); }
       }
     }
 
@@ -1306,6 +1339,20 @@ function loop(ts){
       const m=f.r+6;
       if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
       if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
+    }
+    // 乳酸桿菌の連なりを保つ（拾われた／消えかけたら切れる）
+    for(const r of rods){
+      if(!r.link) continue;
+      if(r.joined||r.dying!=null||r.link.joined||r.link.dying!=null||r.link.dead){ unlinkRod(r); continue; }
+      const o=r.link;
+      const dx=o.x-r.x, dy=o.y-r.y, d=Math.hypot(dx,dy)||0.0001;
+      const target=RLEN*0.92;
+      const k=((d-target)/d)*0.5*0.40;
+      r.x+=dx*k; r.y+=dy*k; o.x-=dx*k; o.y-=dy*k;
+      // 向きも隣に揃える＝柵状に並んで見える
+      const a=Math.atan2(dy,dx);
+      let da=a-r.ang; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+      r.ang+=da*0.06; o.ang+=da*0.06;
     }
     // 連鎖を保つ（隣同士が離れないように引き合う）。2回ゆるめると鎖がしなやかに揺れる
     for(let pass=0;pass<2;pass++){
@@ -1444,11 +1491,18 @@ function loop(ts){
 
   // シャッターの破片フラッシュ（弾けた地点の輪）
   for(const s of shards){ s.life-=dt*2.6;
-    if(s.life>0){ g.beginPath(); g.arc(s.x,s.y,(1-s.life)*70+8,0,7);
-      g.strokeStyle= s.good? 'rgba(150,255,205,'+(0.65*s.life)+')' : 'rgba(255,150,120,'+(0.6*s.life)+')';
-      g.lineWidth=3+6*s.life; g.stroke(); } }
+    if(s.life>0){ g.beginPath(); g.arc(s.x,s.y,(1-s.life)*(s.small?16:70)+(s.small?3:8),0,7);
+      g.strokeStyle= s.good? 'rgba(180,255,225,'+((s.small?0.75:0.65)*s.life)+')' : 'rgba(255,150,120,'+(0.6*s.life)+')';
+      g.lineWidth=(s.small?1.2:3)+(s.small?1.6:6)*s.life; g.stroke(); } }
   shards=shards.filter(s=>s.life>0);
 
+  // 乳酸桿菌の連なり（首）
+  for(const r of rods){
+    if(r.joined||!r.link||r.link.joined) continue;
+    if(!inView(r.x,r.y,40)) continue;
+    g.beginPath(); g.moveTo(r.x,r.y); g.lineTo(r.link.x,r.link.y);
+    g.strokeStyle='rgba(215,235,240,.45)'; g.lineWidth=RW*0.75; g.lineCap='round'; g.stroke();
+  }
   // 浮遊中の味方
   for(const r of rods){ if(r.joined) continue;
     if(!inView(r.x,r.y) && !(r.vx||r.vy) && !(r.doom>0)) continue;
@@ -1495,6 +1549,7 @@ function loop(ts){
     else if(r.born!=null && clock-r.born<0.35) alpha*=Math.max(0,(clock-r.born)/0.35);
     drawRod(r.x,r.y,r.ang+wob,false,alpha,weak,r.div);
   }
+  for(const r of rods) if(r.dead){ if(r.link&&r.link.next===r) r.link.next=null; if(r.next) r.next.link=null; }
   rods=rods.filter(r=>!r.dead);
   // つながった味方
   for(let k=0;k<joined.length;k++){
