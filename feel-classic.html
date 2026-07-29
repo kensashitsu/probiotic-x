@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v89 (07-29 16:56)';
+const BUILD='v90 (07-29 17:01)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -398,8 +398,12 @@ const WARN_OUT=+(_q.get('warn')||0);      // 画面外どれだけまでの敵�
 const WARN_N=+(_q.get('warnn')||14);      // 一度に出す印の数
 const LEAD_SM=+(_q.get('leadsm')||4.0);   // 追従の速さ（大きいほど機敏／酔いやすい）
 let lead={x:0,y:0};
-function viewX(){ return cam.x+lead.x; }
-function viewY(){ return cam.y+lead.y; }
+// ★視界そのものをずらす方式は「酔う」で却下（世界ごと横に滑るため、
+//   指を止めていても盤面が動いてしまう）。カメラは元のまま＝余計な流れを一切足さず、
+//   代わりに「先頭を指より後ろに置く」ことで進行方向の余白を稼ぐ。
+//   動くのは先頭だけなので、視界の流れは今までと同じ
+function viewX(){ return cam.x; }
+function viewY(){ return cam.y; }
 function updLead(dt){
   const sp=Math.hypot(camVel.x,camVel.y);
   let tx=0, ty=0;
@@ -413,9 +417,11 @@ function updLead(dt){
   const shrink=Math.hypot(tx,ty) < Math.hypot(lead.x,lead.y);
   const k=Math.min(1, dt*LEAD_SM*(shrink? 2.4:1));
   lead.x+=(tx-lead.x)*k; lead.y+=(ty-lead.y)*k;
-  // 世界の外を見せない（端では先読みしても意味が無い）
-  lead.x=Math.max(-cam.x, Math.min(camMaxX()-cam.x, lead.x));
-  lead.y=Math.max(-cam.y, Math.min(camMaxY()-cam.y, lead.y));
+  // 画面からはみ出すほど下げない（先頭が見えなくなると狙えない）。
+  // 横は広く取れるが、盤面は縦が薄いので縦は控えめにする
+  const lx=W*0.40, ly=Math.max(60,(H-PLAY_TOP))*0.30;
+  lead.x=Math.max(-lx,Math.min(lx,lead.x));
+  lead.y=Math.max(-ly,Math.min(ly,lead.y));
 }
 // ※動的ズーム（疾走中だけ画面を引く）は試したが却下。ユーザー評「酔う」。
 //   既定は無効(1)。?zoom=0.8 のように指定すれば試せるが、常用はしない
@@ -1718,8 +1724,9 @@ function loop(ts){
   if(dragging){
     // ★指を止めたままでもカメラは流れる。先頭は毎フレーム「指の画面位置＋カメラ」で
     //   引き直す。これが無いと先頭だけ世界に取り残されて画面外へ消える
-    moveTo(Math.max(6, Math.min(worldW()-6, finger.x/zoom+cam.x)),
-           Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y/zoom+cam.y)));
+    // 先頭は指の少し後ろ（進行方向の逆）に置く＝その分だけ前が見える
+    moveTo(Math.max(6, Math.min(worldW()-6, finger.x/zoom+cam.x-lead.x)),
+           Math.max(PLAY_TOP-6, Math.min(worldBot()+6, finger.y/zoom+cam.y-lead.y)));
     trimTrail();
     // 頭の速さ→オーラ
     // ★オーラは「世界の中でどれだけ速く動いているか」＝頭の速さで決める。
