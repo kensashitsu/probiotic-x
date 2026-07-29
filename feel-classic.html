@@ -83,7 +83,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v67 (07-29 13:12)';
+const BUILD='v68 (07-29 13:19)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -1087,9 +1087,24 @@ function unlockAudio(){
   }
   const pr=silentEl.play(); if(pr&&pr.catch) pr.catch(()=>{});
 }
+let acUnlocked=false, acErr='', acRetry=-9;
 function ac(){
-  if(!A){ try{A=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} }
-  if(A&&A.state!=='running'){ try{A.resume();}catch(e){} }
+  if(!A){
+    try{ A=new (window.AudioContext||window.webkitAudioContext)(); }
+    catch(e){ acErr='ctx'; return; }
+  }
+  if(!A){ acErr='none'; return; }
+  if(A.state!=='running'){ try{ A.resume(); }catch(e){} }
+  // ★iOS定番の解錠：タップ中に「1サンプルの無音」をWebAudio経由で鳴らす。
+  //   これをやらないと、resume() を呼んでも実際には音が出ないことがある（実機で発生）
+  if(!acUnlocked){
+    try{
+      const b=A.createBuffer(1,1,22050);
+      const src=A.createBufferSource(); src.buffer=b; src.connect(A.destination);
+      if(src.start) src.start(0); else if(src.noteOn) src.noteOn(0);
+      acUnlocked=true;
+    }catch(e){ acErr='unlock'; }
+  }
   unlockAudio();
 }
 function pop(n){ if(!A)return; try{
@@ -1359,6 +1374,8 @@ function loop(ts){
   clock+=dt;
   if(sealCooldown>0) sealCooldown-=dt;
   if(hitCd>0) hitCd-=dt;
+  // 音が止まったままなら、なぞっている間に1秒おきに復帰を試みる（実機で無音になる保険）
+  if(dragging && A && A.state!=='running' && clock-acRetry>1){ acRetry=clock; try{A.resume();}catch(e){} }
   followCam(dt); updateZoom(dt);
   if(dragging){
     // ★指を止めたままでもカメラは流れる。先頭は毎フレーム「指の画面位置＋カメラ」で
