@@ -156,7 +156,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v79 (07-29 15:25)';
+const BUILD='v80 (07-29 15:31)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -285,7 +285,7 @@ const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
 const AURA_TAIL=+(_q.get('tail')||0.55);
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
-let aura=0, auraTail=0, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
+let aura=0, auraTail=0, saveSeen=false, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
 function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
 const FOE_R=RW*FOE_K/2;                       // 腐敗菌の半径
@@ -606,7 +606,7 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -1001,6 +1001,8 @@ function checkHit(guard){
 // 余韻に守られた＝飛び散らずに弾き返す。守ったことが分かるよう光らせて音も鳴らす
 function auraSave(f){
   hitCd=0.30; auraFlash=1; resistSnd(1);
+  if(!saveSeen){ saveSeen=true;
+    tipMsg('余韻が守った ─ オーラが切れた直後は、しばらく触れても弾け飛ばない'); }
   const a=Math.atan2(f.y-head.y, f.x-head.x);
   f.vx=(f.vx||0)+Math.cos(a)*190; f.vy=(f.vy||0)+Math.sin(a)*190;
 }
@@ -1369,13 +1371,16 @@ function drawRod(x,y,ang,joined,alpha,weak,divp){
     g.shadowColor='rgba(190,255,225,'+(0.5+0.5*t)+')'; g.shadowBlur=6+10*t;
   }
   // ★酸を纏っている間は列そのものが青白く帯電して見える＝オン/オフが一目で分かる
-  const armed = joined && aura>0.35;
-  if(joined){ g.shadowColor= armed? 'rgba(150,240,255,.95)':'rgba(140,240,200,.9)';
-              g.shadowBlur= armed? 16:10; }
+  //   余韻の間も帯電を残す（一段落とした青）。ここで急にミントへ戻ると「もう守られていない」
+  //   ように見えてしまい、実際は守られているのに分からなかった
+  const tint = joined? (aura>0.35? 1 : (auraTail>0? 0.62:0)) : 0;
+  const armed = tint>0;
+  if(joined){ g.shadowColor= armed? 'rgba(150,240,255,'+(0.55+0.4*tint)+')':'rgba(140,240,200,.9)';
+              g.shadowBlur= armed? (10+6*tint):10; }
   if(divp>0.62) g.fillStyle='#f2fffa';   // 割れた直後は白く光る
   // weak=餓死しかけ＝退色（乳白→くすんだ灰）
-  g.fillStyle= armed? '#eafcff' : (joined? '#c8ffe6' : (divp>0? '#eefff8' : (weak? '#9aa0a0' : '#dfeef0')));
-  g.strokeStyle= armed? 'rgba(150,235,255,1)' : (joined? 'rgba(120,235,190,.9)':'rgba(120,150,160,.5)');
+  g.fillStyle= armed? (tint>0.8?'#eafcff':'#d8f2ff') : (joined? '#c8ffe6' : (divp>0? '#eefff8' : (weak? '#9aa0a0' : '#dfeef0')));
+  g.strokeStyle= armed? 'rgba(150,235,255,'+(0.55+0.45*tint)+')' : (joined? 'rgba(120,235,190,.9)':'rgba(120,150,160,.5)');
   g.lineWidth= armed? 1.4:1;
   if(PLAYER_SHAPE==='cocci'){
     // 球菌：1個ずつ数えられる数珠つなぎになる
@@ -2111,6 +2116,34 @@ function loop(ts){
       g.globalAlpha=0.55*gA; g.setLineDash([7,9]); g.lineDashOffset=-clock*70;
       g.lineWidth=1.6; g.stroke(); g.restore();
     }
+    g.restore();
+  }
+  // ★余韻の見える化。オーラ本体（青く光って敵を弾く）と混ざらないよう、別物として描く：
+  //   ・列を包む薄い膜が、残り時間ぶんだけ細く縮んでいく
+  //   ・残りが少ないほど速く点滅する＝「もうすぐ切れる」が分かる
+  //   ・先頭に残り時間の輪（減っていく弧）を出す
+  //   色だけ薄くする方式では「余韻があるのか分からない」と却下されたので、動きで見せる
+  if(dragging && auraTail>0 && aura<=0.35){
+    const u=Math.max(0,Math.min(1,auraTail/AURA_TAIL));
+    const R=auraR()*(0.46+0.34*u)*(1+0.5*auraFlash);
+    const blink=0.60+0.40*Math.sin(clock*(13+30*(1-u)));
+    const pts=[{x:head.x,y:head.y}];
+    for(let i=joined.length-1;i>=0;i--) pts.push({x:joined[i].x,y:joined[i].y});
+    g.save(); g.lineCap='round'; g.lineJoin='round';
+    const trace=()=>{ g.beginPath(); g.moveTo(pts[0].x,pts[0].y);
+      for(let i=1;i<pts.length;i++) g.lineTo(pts[i].x,pts[i].y); };
+    if(pts.length>1){
+      g.globalCompositeOperation='lighter';
+      g.strokeStyle='rgba(110,220,255,'+(0.15*u*blink)+')'; g.lineWidth=R*1.45; trace(); g.stroke();
+      g.strokeStyle='rgba(200,245,255,'+(0.10*u*blink)+')'; g.lineWidth=R*0.70; trace(); g.stroke();
+      g.globalCompositeOperation='source-over';
+      g.strokeStyle='rgba(215,248,255,'+(0.80*u*blink)+')'; g.lineWidth=1.8;
+      g.setLineDash([5,8]); g.lineDashOffset=-clock*95; trace(); g.stroke(); g.setLineDash([]);
+    }
+    // 先頭の残り時間リング（一周＝余韻の満タン）
+    g.globalCompositeOperation='source-over';
+    g.strokeStyle='rgba(190,242,255,'+(0.85*blink)+')'; g.lineWidth=2.4; g.lineCap='round';
+    g.beginPath(); g.arc(head.x,head.y,13.5,-Math.PI/2,-Math.PI/2+Math.PI*2*u); g.stroke();
     g.restore();
   }
   if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
