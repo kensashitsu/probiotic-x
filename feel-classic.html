@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v51 (07-29 10:09)';
+const BUILD='v52 (07-29 10:16)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -138,8 +138,8 @@ const CHAIN_MAX=+(_q.get('chain')||7);   // 連鎖の最大の長さ
 //   ?dbg=1 で「今の速さ・オーラ値・閾値」を画面に出せる（実機で詰めるため）
 const TURN_R_LO=+(_q.get('trlo')||190);   // 旋回半径がこれ以下ならオーラは出ない（囲む動作）
 const TURN_R_HI=+(_q.get('trhi')||400);   // これ以上なら疾走扱い（纏ったまま曲がれる）
-const AURA_LO=+(_q.get('auralo')||520);   // この速さを超えるとオーラが出る(px/秒)
-const AURA_HI=+(_q.get('aurahi')||1000);  // ここで最大
+const AURA_LO=+(_q.get('auralo')||380);   // この速さを超えるとオーラが出る(px/秒)
+const AURA_HI=+(_q.get('aurahi')||780);   // ここで最大
 const AURA_R0=+(_q.get('aura0')||40);     // オーラの基準半径（短い列でも見える大きさ）
 const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
@@ -1122,11 +1122,16 @@ function loop(ts){
     //   ・輪を作る動き＝小さく回る（半径70〜150px）→ 解除して囲める
     //   ・疾走中の進路変更＝大きく曲がる（半径300px〜）→ 纏ったまま曲がれる
     //   曲がる速さだけで切ると「纏ったまま曲がりたい」が叶わない（ユーザー指摘）
-    turnR += (headSpd/Math.max(0.6,turnRate) - turnR)*Math.min(1, dt*9);
+    // 半径は「広がる時は素早く・狭まる時は緩やか」＝走り出しですぐ武装できる
+    const tr=headSpd/Math.max(0.6,turnRate);
+    turnR += (tr-turnR)*Math.min(1, dt*(tr>turnR? 18:9));
     const gate=Math.max(0,Math.min(1,(turnR-TURN_R_LO)/(TURN_R_HI-TURN_R_LO)));
-    const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*gate;
+    // 触った直後の一瞬は出さない。ここで点くと最初の1匹が拾えず、
+    //   囲み始めも潰れる（カメラも同じ理由で開始直後は流さない）
+    const start0=(clock-strokeT0<0.25)?0:1;
+    const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*gate*start0;
     const wasArmed=aura>0.35;
-    aura += (want-aura)*Math.min(1,dt*(want>aura?11:5));   // 一瞬の振れでは点かない
+    aura += (want-aura)*Math.min(1,dt*(want>aura?22:5));   // 点くのは素早く、消えるのは緩やか
     if(!wasArmed && aura>0.35){ auraOnSnd(); auraFlash=1; }
     else if(wasArmed && aura<=0.35) auraOffSnd();
     if(aura>0.35 && joinedCount>0) auraBurst(); else checkHit();
