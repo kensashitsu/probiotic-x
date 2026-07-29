@@ -49,6 +49,7 @@
   #sndbtn{pointer-events:auto;font:inherit;font-size:12px;line-height:1;color:#9fb3ac;
     background:rgba(255,255,255,.07);border:0;border-radius:999px;padding:4px 9px}
   #sndbtn.off{background:rgba(255,120,90,.22);color:#ffb0a0}
+  #sndbtn.wait{opacity:.55}
   body.short #sndbtn{font-size:11px;padding:3px 7px}
   #tip{position:absolute;top:calc(env(safe-area-inset-top) + 66px);left:0;right:0;text-align:center;
     font-size:12px;line-height:1.5;color:#6f7d84;padding:0 14px;
@@ -161,7 +162,7 @@
   <div class="rs">なぞって<b>乳酸菌（白い桿菌）</b>を繋ぎ、<b>腐敗菌（ピンクの球菌）</b>を輪で囲んで溶かす。<br>
   90秒後に<b>数の多い方が勝ち</b>。触れると鎖は弾け、速く走ると<b>酸のオーラ</b>を纏う。</div>
   <button id="go">タップして開始</button>
-  <div class="rn">※ブラウザの仕様で、音は最初のタップから鳴り始めます（右上の <b>🔊</b> でいつでも確認できます）</div>
+  <div class="rn">※ブラウザの仕様で、音は最初のタップから鳴り始めます。右上の <b>🔊</b> でオン/オフできます</div>
   <div class="rn" id="a2hs">※<b style="color:#8ff0c0">共有 → ホーム画面に追加</b>してから起動すると、
     アドレスバーが消えて画面が広くなります</div>
 </div>
@@ -174,7 +175,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v96 (07-30 07:27)';
+const BUILD='v97 (07-30 08:21)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1348,17 +1349,25 @@ function beginMatch(){
   document.getElementById('ready').addEventListener(ev,e=>{ e.preventDefault(); beginMatch(); },{passive:false});
 });
 document.getElementById('reset').addEventListener('click',()=>{scatter();});
-// ★音の確認用。押すと必ず1音鳴らす。ここで無音なら本体側（音量・消音スイッチ）が原因、
-//   ボタンが赤い（＝AudioContextが running でない）ならブラウザ側が原因、と切り分けられる
+// ★音のオン/オフ。押すと切り替わり、記憶される。
+//   オンにした時は1音鳴らして「今どっちか」を耳でも確認できるようにする
 const elSnd=document.getElementById('sndbtn');
 ['click','touchend'].forEach(ev=>{
   elSnd.addEventListener(ev,e2=>{ e2.preventDefault(); e2.stopPropagation();
-    ac(); setTimeout(()=>{ ac(); if(A&&A.state==='running') startChime(); },60); },{passive:false});
+    muted=!muted;
+    try{ localStorage.setItem('mute', muted?'1':'0'); }catch(e3){}
+    updSndBtn();
+    if(!muted){ ac(); setTimeout(()=>{ ac(); if(A&&A.state==='running') startChime(); },60); }
+  },{passive:false});
 });
 let _sndState=null;
 function updSndBtn(){
-  const ok = !!(A && A.state==='running');
-  if(ok!==_sndState){ _sndState=ok; elSnd.classList.toggle('off',!ok); elSnd.textContent= ok? '🔊':'🔇'; }
+  // 消音中＝赤い🔇／音は出す設定だがまだ鳴らせない（未解錠）＝薄い🔊／鳴る＝🔊
+  const st = muted? 'off' : ((A && A.state==='running')? 'on':'wait');
+  if(st!==_sndState){ _sndState=st;
+    elSnd.classList.toggle('off', st==='off');
+    elSnd.classList.toggle('wait', st==='wait');
+    elSnd.textContent= muted? '🔇':'🔊'; }
 }
 document.getElementById('again').addEventListener('click',()=>{scatter();});
 
@@ -1404,6 +1413,11 @@ function pointBack(d){
 //  ★<audio>方式は音は出たが、play()が高コストで動作が重くなった。
 // ============================================================
 let A=null, acUnlocked=false, acErr='', sndPlays=0, chimed=false;
+// ★iOSのSafariはWebAudioを消音スイッチで止めないことが多い（<audio>とは扱いが違う）。
+//   audioSession='ambient' が効かない端末ではOS側で止められないので、
+//   ゲーム側に消音を持つ。HUDの🔊がその切り替えで、選択は記憶する
+let muted=false;
+try{ muted=(localStorage.getItem('mute')==='1'); }catch(e){}
 // デバッグ表示：?dbg=1 でも、左下のバージョンを3回タップでも出せる
 let dbgOn=(_q.get('dbg')==='1'), dbgTap=0, dbgTapT=-9;
 // ★音の扱い（WebKitのみ・iOS16.4以降。無ければ何も起きない）
@@ -1439,6 +1453,7 @@ function ac(){
 });
 // 音が有効になった合図。診断用に付けたが、目立たない1音に留める
 function startChime(){
+  if(muted) return;
   try{
     const t=A.currentTime;
     const o=A.createOscillator(), g2=A.createGain();
@@ -1456,6 +1471,7 @@ const SND_GAP={pop:60, fizz:110, crack:90, brk:150, burst:150, div:260, bump:260
                auraOn:200, auraOff:200, resist:200};
 const _lastKey={};
 function sndOK(key){
+  if(muted) return false;
   const g=(SND_GAP[key]!=null? SND_GAP[key]:110)/1000;
   if(clock-(_lastKey[key]||-9)<g) return false;
   _lastKey[key]=clock; sndPlays++; return true;
