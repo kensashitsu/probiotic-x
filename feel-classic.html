@@ -174,7 +174,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v93 (07-30 06:21)';
+const BUILD='v94 (07-30 07:04)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -346,6 +346,13 @@ const TURN_R_LO=+(_q.get('trlo')||200);   // 旋回半径がこれ以下なら�
 const TURN_R_HI=+(_q.get('trhi')||420);   // これ以上なら疾走扱い（纏ったまま曲がれる）
 const AURA_LO=+(_q.get('auralo')||800);   // この速さを超えるとオーラが出る(px/秒)
 const AURA_HI=+(_q.get('aurahi')||1300);  // ここで最大
+// ★盤面が流れている間は守る（ユーザー発案「慣性で動き出すと同時にオーラを纏う」）。
+//   ただし「纏う」＝拾えない・囲えない だと代償が大きい（実測：一筆で拾える鎖 12→8匹）。
+//   そこで**守りだけ**を渡す：流れている間は触れても飛び散らない（＝GUARD_FLOW）。
+//   拾う・囲うは今まで通りできるので、見えないまま突っ込む事故だけが消える。
+//   AURA_FLOW は「纏う」版（拾えなくなる）。試したい時だけ ?flowaura=600 で有効にする
+const AURA_FLOW=+(_q.get('flowaura')||0);
+const GUARD_FLOW=+(_q.get('gflow')||400); // 盤面がこの速さ以上で流れていたら守る(px/秒)。0で無効
 const AURA_R0=+(_q.get('aura0')||40);     // オーラの基準半径（短い列でも見える大きさ）
 const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
 // ★オーラが切れた瞬間に敵と触れると連鎖が飛び散る。減速＝囲む動きに入った直後は必ず
@@ -364,7 +371,7 @@ const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めてい�
 let parkT=0, camW=1, isMouse=false;
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
-let aura=0, auraTail=0, saveSeen=false, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
+let aura=0, auraTail=0, saveSeen=false, guardOn=false, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
 function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
 const FOE_R=RW*FOE_K/2;                       // 腐敗菌の半径
@@ -592,7 +599,7 @@ function followCam(dt){
   if(dragging && (clock-strokeT0<0.13 || dirRef.ang==null)){
     prevFinger.x=finger.x; prevFinger.y=finger.y; return;
   }
-  if(!dragging){ aura=0; headSpd=0; fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
+  if(!dragging){ aura=0; guardOn=false; headSpd=0; fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
     camVel.x=0; camVel.y=0;
     prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
   const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
@@ -1199,7 +1206,8 @@ function checkHit(guard){
 function auraSave(f){
   hitCd=0.30; auraFlash=1; resistSnd(1);
   if(!saveSeen){ saveSeen=true;
-    tipMsg('余韻が守った ─ オーラが切れた直後は、しばらく触れても弾け飛ばない'); }
+    tipMsg(guardOn? '流れている間は守られる ─ 先が見えないまま当たっても飛び散らない'
+                  : '余韻が守った ─ オーラが切れた直後は、しばらく触れても弾け飛ばない'); }
   const a=Math.atan2(f.y-head.y, f.x-head.x);
   f.vx=(f.vx||0)+Math.cos(a)*190; f.vy=(f.vy||0)+Math.sin(a)*190;
 }
@@ -1570,7 +1578,7 @@ function drawRod(x,y,ang,joined,alpha,weak,divp){
   // ★酸を纏っている間は列そのものが青白く帯電して見える＝オン/オフが一目で分かる
   //   余韻の間も帯電を残す（一段落とした青）。ここで急にミントへ戻ると「もう守られていない」
   //   ように見えてしまい、実際は守られているのに分からなかった
-  const tint = joined? (aura>0.35? 1 : (auraTail>0? 0.62:0)) : 0;
+  const tint = joined? (aura>0.35? 1 : (auraTail>0? 0.62 : (guardOn? 0.32:0))) : 0;
   const armed = tint>0;
   if(joined){ g.shadowColor= armed? 'rgba(150,240,255,'+(0.55+0.4*tint)+')':'rgba(140,240,200,.9)';
               g.shadowBlur= armed? (10+6*tint):10; }
@@ -1817,13 +1825,17 @@ function loop(ts){
     // ※0.25秒だと走り出しの"指の振り"まで食べてしまい点灯が0.5秒遅れた。
     //   最初の1匹は touchstart 時点で拾えているので、抑制は最小限で足りる
     const start0=(clock-strokeT0<0.12)?0:1;
-    const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*gate*start0;
+    let want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*gate*start0;
+    // 盤面が流れ出したら（＝スクロール中＝先が見えない）その時点で纏う
+    if(AURA_FLOW>0 && Math.hypot(camVel.x,camVel.y)>AURA_FLOW) want=Math.max(want, gate*start0);
     const wasArmed=aura>0.35;
     aura += (want-aura)*Math.min(1,dt*(want>aura?22:5));   // 点くのは素早く、消えるのは緩やか
     if(!wasArmed && aura>0.35){ auraOnSnd(); auraFlash=1; auraTail=0; }
     else if(wasArmed && aura<=0.35){ auraOffSnd(); auraTail=AURA_TAIL; }   // ここから余韻
     // 余韻の間は攻撃力は無いが、触れても飛び散らない（＝減速して囲みに入れる）
-    if(aura>0.35 && joinedCount>0) auraBurst(); else checkHit(auraTail>0);
+    // 流れている間は守る（先が見えないまま突っ込む事故を無くす）。攻撃力は無し
+    guardOn = (GUARD_FLOW>0 && Math.hypot(camVel.x,camVel.y)>GUARD_FLOW);
+    if(aura>0.35 && joinedCount>0) auraBurst(); else checkHit(auraTail>0 || guardOn);
   }
 
 
@@ -2334,10 +2346,10 @@ function loop(ts){
   //   ・残りが少ないほど速く点滅する＝「もうすぐ切れる」が分かる
   //   ・先頭に残り時間の輪（減っていく弧）を出す
   //   色だけ薄くする方式では「余韻があるのか分からない」と却下されたので、動きで見せる
-  if(dragging && auraTail>0 && aura<=0.35){
-    const u=Math.max(0,Math.min(1,auraTail/AURA_TAIL));
+  if(dragging && (auraTail>0 || guardOn) && aura<=0.35){
+    const u=(auraTail>0)? Math.max(0,Math.min(1,auraTail/AURA_TAIL)) : 0.42;
     const R=auraR()*(0.46+0.34*u)*(1+0.5*auraFlash);
-    const blink=0.60+0.40*Math.sin(clock*(13+30*(1-u)));
+    const blink=(auraTail>0)? 0.60+0.40*Math.sin(clock*(13+30*(1-u))) : 0.85;   // 守りだけの時は点滅しない
     const pts=[{x:head.x,y:head.y}];
     for(let i=joined.length-1;i>=0;i--) pts.push({x:joined[i].x,y:joined[i].y});
     g.save(); g.lineCap='round'; g.lineJoin='round';
@@ -2351,10 +2363,12 @@ function loop(ts){
       g.strokeStyle='rgba(215,248,255,'+(0.80*u*blink)+')'; g.lineWidth=1.8;
       g.setLineDash([5,8]); g.lineDashOffset=-clock*95; trace(); g.stroke(); g.setLineDash([]);
     }
-    // 先頭の残り時間リング（一周＝余韻の満タン）
-    g.globalCompositeOperation='source-over';
-    g.strokeStyle='rgba(190,242,255,'+(0.85*blink)+')'; g.lineWidth=2.4; g.lineCap='round';
-    g.beginPath(); g.arc(head.x,head.y,13.5,-Math.PI/2,-Math.PI/2+Math.PI*2*u); g.stroke();
+    // 先頭の残り時間リング（一周＝余韻の満タン）。守りだけの時は出さない
+    if(auraTail>0){
+      g.globalCompositeOperation='source-over';
+      g.strokeStyle='rgba(190,242,255,'+(0.85*blink)+')'; g.lineWidth=2.4; g.lineCap='round';
+      g.beginPath(); g.arc(head.x,head.y,13.5,-Math.PI/2,-Math.PI/2+Math.PI*2*u); g.stroke();
+    }
     g.restore();
   }
   if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
