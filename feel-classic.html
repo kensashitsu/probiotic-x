@@ -166,7 +166,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v85 (07-29 16:15)';
+const BUILD='v86 (07-29 16:22)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -480,6 +480,11 @@ const FLOW_MIN=230;       // これ以下の速さでは流れない。輪を描
 //   端で最大。以前は「デッドゾーンの幅」と「加速の効き幅」が同じ変数だったため、
 //   狭くするとスイッチのように全開になってしまい調整できなかった。式ごと分離した。
 const CAM_DEAD=0.06;      // 中央のごく狭い不感帯（ここだけは流れない）
+// ★マウスは絶対位置のデバイスなので、指のように「押し出し続けている」状態を作れない。
+//   ポインタは置いた場所に残るだけなのに、中央から離れているというだけで盤面が流れ続け、
+//   カメラ速度が溜まって暴走する（PCで実測：中心から330pxで毎秒959px、540pxで1190px）。
+//   マウスの時は中央の広い範囲を不感帯にして、端に寄せた時だけ流す
+const CAM_DEAD_MOUSE=+(_q.get('deadm')||0.55);
 // ★端まで行った時の速さは「指で払う速さ」より速くないと、端に着いた瞬間に
 //   減速して壁にぶつかったように感じる（＝走りを阻害される）。
 //   立ち上がりも二次カーブだと手前が効かないので直線にする
@@ -529,10 +534,11 @@ function followCam(dt){
   //   上端が通知のジェスチャ帯なので、最高速を出すには指をOSに奪われる場所まで
   //   運ばされていた（touchcancel＝鎖が消える）。端より手前(78%)で最高速に達するようにする。
   //   副作用として指先の前に余白が残るので「先が見えない」も同時に軽くなる
+  const dead = isMouse? CAM_DEAD_MOUSE : CAM_DEAD;
   const shape=v=>{
     const a=Math.abs(v);
-    if(a<CAM_DEAD) return 0;
-    const t=Math.min(1,(a-CAM_DEAD)/Math.max(0.05,1-EDGE_GUARD-CAM_DEAD));
+    if(a<dead) return 0;
+    const t=Math.min(1,(a-dead)/Math.max(0.05,1-EDGE_GUARD-dead));
     return (v<0?-1:1)*Math.pow(t,0.7);
   };
   cx+=shape((finger.x-W/2)/(W/2))*PAN_MAX;
