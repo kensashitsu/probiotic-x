@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v52 (07-29 10:16)';
+const BUILD='v53 (07-29 10:29)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -353,19 +353,12 @@ function usableTrail(){
   if(aura>0.35) return joinedCount*SPACING+24;
   return ACID_BASE + joinedCount*ACID_PER;
 }
-// ★手の死角対策。指と手のひらは半径55〜64pxを覆うので、近くの腐敗菌には
-//   「手の外側まではみ出す大きさ」の警告リングを出す。操作系は変えない
-const DANGER_R=95;     // 警告に気付き始める距離
-const HAND_R=64;       // この距離まで来たら手の下＝警告を最大にする
-function warnLevel(d){ return Math.max(0, Math.min(1, (DANGER_R-d)/(DANGER_R-HAND_R))); }
 
 // ★盤面が静止していると生き物に見えないので、味方・敵ともゆっくり漂わせる。
 //   速さは「避けようと思えば必ず避けられる」範囲に抑える（毎秒6〜8px＝菌1個分/2秒）。
 //   ぶつかりが運任せになると理不尽になるので、ここは絶対に上げすぎない
 const DRIFT=Math.max(0, Math.min(4, +(_q.get('drift')||1)));
 const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
-const LOUPE_R=+(_q.get('loupeR')||135);  // 手の下にこの距離まで雑菌が来たらルーペを出す
-let loupeA=0;                            // ルーペの表示量（滑らかに出入りする）
 // ============================================================
 //  目的：フィールドは「食品」。乳酸と腐敗が1本のゲージで押し合い、
 //  その割合は"生きている乳酸菌の数"と"腐敗菌の数"の比でリアルタイムに動く。
@@ -436,7 +429,7 @@ function scatter(){
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; lunges=[]; aura=0; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; phase='play'; playT=0;
-  foeAcc=0; allyAcc=0; loupeA=0;
+  foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
   updateHud(); updateBar();
@@ -1572,60 +1565,20 @@ function loop(ts){
 
   g.restore(); // 世界座標ここまで＋画面揺れ
 
-  // ★阻害要素③：手の死角。指と手のひらは半径55〜64pxを覆うので、指の真下と手前は
-  //   物理的に絶対に見えない。操作点を指からずらす案は却下されたので（違和感＋ミス増）、
-  //   "覆われている場所だけを、手が届かない画面上部に映す"。操作は一切変えない。
-  //   赤い警告リング（盤面に重ねる方式）は邪魔だと却下されたが、これは盤面の外なので干渉しない。
-  //   さらに、盤面を隠す面積を最小にするため「実際に手の下に雑菌がいる時だけ」出す。
-  //   何も無い間は消えているので、常時どこかが見えないという不満が出ない。
-  let nearFoe=1e9;
-  if(dragging) for(const f of foes){ if(f.dead) continue;
-    const d=Math.hypot(f.x-head.x,f.y-head.y); if(d<nearFoe) nearFoe=d; }
-  const wantL=(dragging && nearFoe<LOUPE_R)?1:0;
-  loupeA+=(wantL-loupeA)*Math.min(1, dt*(wantL>loupeA? 14:5));
-  if(loupeA>0.02 && _q.get('loupe')!=='0'){
-    const R=50, LX=W-13-R, LY=106+R, k=0.62;   // 世界の半径約81pxが収まる
-    g.save(); g.globalAlpha=Math.min(1,loupeA);
-    g.beginPath(); g.arc(LX,LY,R,0,7);
-    g.fillStyle='rgba(7,13,17,.90)'; g.fill();
-    g.save(); g.clip();
-    g.translate(LX,LY); g.scale(k,k); g.translate(-head.x,-head.y);
-    // 手で覆われている範囲の目印
-    g.beginPath(); g.arc(head.x,head.y,HAND_R,0,7);
-    g.fillStyle='rgba(255,255,255,.035)'; g.fill();
-    // なぞり線
-    if(path.length>1){
-      g.beginPath(); g.moveTo(path[0].x,path[0].y);
-      for(let i=1;i<path.length;i++) g.lineTo(path[i].x,path[i].y);
-      g.lineTo(head.x,head.y);
-      g.strokeStyle='rgba(140,240,200,.5)'; g.lineWidth=(RW+4)*0.7; g.lineCap='round'; g.stroke();
-    }
-    const RR=R/k+30;
-    for(const r of rods){ if(Math.abs(r.x-head.x)>RR||Math.abs(r.y-head.y)>RR) continue;
-      drawRod(r.x,r.y,r.ang,r.joined,1,false); }
-    for(const f of foes){ if(f.dead) continue;
-      if(Math.abs(f.x-head.x)>RR||Math.abs(f.y-head.y)>RR) continue;
-      drawFoe(f,0); }
-    g.beginPath(); g.arc(head.x,head.y,6,0,7);
-    g.fillStyle='rgba(210,255,235,.95)'; g.fill();
-    g.restore();
-    g.strokeStyle='rgba(140,240,200,.40)'; g.lineWidth=1.5;
-    g.beginPath(); g.arc(LX,LY,R,0,7); g.stroke();
-    g.font='700 9.5px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='alphabetic';
-    g.fillStyle='rgba(140,240,200,.55)'; g.fillText('手の下', LX, LY-R-5);
-    g.restore(); g.globalAlpha=1;
-  }
-
   // ミニマップ：広い世界のどこに何が居るかを把握するための最小限の表示
   if(WORLD>1 && _q.get('map')!=='0'){
-    const mw=70, mh=Math.round(mw*(worldBot()-PLAY_TOP)/worldW()), mx=10, my=100;
+    const mw=84, mh=Math.round(mw*(worldBot()-PLAY_TOP)/worldW()), mx=10, my=100;
     g.save();
     g.fillStyle='rgba(10,16,20,.55)'; g.strokeStyle='rgba(140,240,200,.22)'; g.lineWidth=1;
     g.beginPath(); g.rect(mx,my,mw,mh); g.fill(); g.stroke();
     const sx=mw/worldW(), sy=mh/(worldBot()-PLAY_TOP);
+    // 味方（乳酸菌）を先に敷く。どちらが優勢かが地図の色で分かる
+    g.fillStyle='rgba(170,240,215,.85)';
+    for(const r of rods){ if(r.dying!=null) continue;
+      g.beginPath(); g.arc(mx+r.x*sx, my+(r.y-PLAY_TOP)*sy, 1.25, 0, 7); g.fill(); }
+    g.fillStyle='rgba(232,130,175,.95)';
     for(const f of foes){ if(f.dead) continue;
-      g.beginPath(); g.arc(mx+f.x*sx, my+(f.y-PLAY_TOP)*sy, 1.6, 0, 7);
-      g.fillStyle='rgba(226,138,178,.9)'; g.fill(); }
+      g.beginPath(); g.arc(mx+f.x*sx, my+(f.y-PLAY_TOP)*sy, 1.55, 0, 7); g.fill(); }
     // 今なぞっている線
     if(dragging && path.length>1 && aura<=0.35){
       g.beginPath(); g.moveTo(mx+path[0].x*sx, my+(path[0].y-PLAY_TOP)*sy);
