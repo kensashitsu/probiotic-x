@@ -156,7 +156,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v78 (07-29 15:14)';
+const BUILD='v79 (07-29 15:25)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -279,9 +279,13 @@ const AURA_LO=+(_q.get('auralo')||800);   // この速さを超えるとオー�
 const AURA_HI=+(_q.get('aurahi')||1300);  // ここで最大
 const AURA_R0=+(_q.get('aura0')||40);     // オーラの基準半径（短い列でも見える大きさ）
 const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
+// ★オーラが切れた瞬間に敵と触れると連鎖が飛び散る。減速＝囲む動きに入った直後は必ず
+//   その瞬間が来るので、囲えるようになった後もしばらく「弾かれない」余韻を残す。
+//   余韻の間は囲える・拾える（攻撃力は無い＝守りだけ残る）
+const AURA_TAIL=+(_q.get('tail')||0.55);
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
-let aura=0, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
+let aura=0, auraTail=0, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
 function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
 const FOE_R=RW*FOE_K/2;                       // 腐敗菌の半径
@@ -602,7 +606,7 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -657,7 +661,7 @@ function start(x,y){
   // カメラは「向きが確定してから」流す。初動で流すと輪が敵からずれて空振りする
   straight=0; turnRate=0; strokeT0=clock; camVel.x=0; camVel.y=0;
   dirRef={x:finger.x, y:finger.y, ang:null, t:clock};
-  auraPF.x=finger.x; auraPF.y=finger.y; aura=0; headSpd=0;
+  auraPF.x=finger.x; auraPF.y=finger.y; aura=0; auraTail=0; headSpd=0;
   ac(); catchNear(x,y);
 }
 function moveTo(x,y){
@@ -981,16 +985,24 @@ function sweptHit(ax,ay,bx,by,f,HIT){
   }
   return false;
 }
-function checkHit(){
+function checkHit(guard){
   if(hitCd>0) return;
   const HIT=RW/2+4;
   for(const f of foes){ if(f.dead) continue;
-    if(sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,HIT)){ shatter(f.x,f.y); return; } }
+    if(sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,HIT)){
+      if(guard) auraSave(f); else shatter(f.x,f.y); return; } }
   if(HIT_MODE==='all'){
     for(const r of rods){ if(!r.joined) continue;
       for(const f of foes){ if(f.dead) continue;
-        if(foeDist(r.x,r.y,f) < HIT){ shatter(f.x,f.y); return; } } }
+        if(foeDist(r.x,r.y,f) < HIT){
+          if(guard) auraSave(f); else shatter(f.x,f.y); return; } } }
   }
+}
+// 余韻に守られた＝飛び散らずに弾き返す。守ったことが分かるよう光らせて音も鳴らす
+function auraSave(f){
+  hitCd=0.30; auraFlash=1; resistSnd(1);
+  const a=Math.atan2(f.y-head.y, f.x-head.x);
+  f.vx=(f.vx||0)+Math.cos(a)*190; f.vy=(f.vy||0)+Math.sin(a)*190;
 }
 // 酸のオーラが連鎖に触れたら、その連鎖を丸ごと弾き飛ばす
 function auraBurst(){
@@ -1555,6 +1567,7 @@ function loop(ts){
   clock+=dt;
   if(sealCooldown>0) sealCooldown-=dt;
   if(hitCd>0) hitCd-=dt;
+  if(auraTail>0) auraTail-=dt;
   // resume は非同期なので、実際に running になった瞬間を拾って合図を鳴らす
   if(!chimed && A && A.state==='running'){ chimed=true; acUnlocked=true; startChime(); }
   updSndBtn();
@@ -1596,9 +1609,10 @@ function loop(ts){
     const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*gate*start0;
     const wasArmed=aura>0.35;
     aura += (want-aura)*Math.min(1,dt*(want>aura?22:5));   // 点くのは素早く、消えるのは緩やか
-    if(!wasArmed && aura>0.35){ auraOnSnd(); auraFlash=1; }
-    else if(wasArmed && aura<=0.35) auraOffSnd();
-    if(aura>0.35 && joinedCount>0) auraBurst(); else checkHit();
+    if(!wasArmed && aura>0.35){ auraOnSnd(); auraFlash=1; auraTail=0; }
+    else if(wasArmed && aura<=0.35){ auraOffSnd(); auraTail=AURA_TAIL; }   // ここから余韻
+    // 余韻の間は攻撃力は無いが、触れても飛び散らない（＝減速して囲みに入れる）
+    if(aura>0.35 && joinedCount>0) auraBurst(); else checkHit(auraTail>0);
   }
 
 
@@ -2062,8 +2076,11 @@ function loop(ts){
 
   // ★疾走中の酸のオーラ。先頭だけでなく繋がった列全体が纏う（判定も列全体）
   auraFlash=Math.max(0,auraFlash-dt*3.2);
-  if(dragging && aura>0.03){
-    const R=auraR()*(0.6+0.4*aura)*(1+0.45*auraFlash), pu=0.90+0.10*Math.sin(clock*14);
+  // ★余韻の間も薄く光らせる。急に消えると「守られているのか」が分からないので、
+  //   オーラ値の実際の減衰に、余韻の残り時間ぶんの下限を重ねて出す
+  const gA=Math.max(aura, auraTail>0? 0.30*(auraTail/AURA_TAIL):0);
+  if(dragging && gA>0.03){
+    const R=auraR()*(0.6+0.4*gA)*(1+0.45*auraFlash), pu=0.90+0.10*Math.sin(clock*14);
     const pts=[{x:head.x,y:head.y}];
     // joined は order 昇順＝0が尻尾。先頭から尻尾へ向かう順に並べ直す
     for(let i=joined.length-1;i>=0;i--) pts.push({x:joined[i].x,y:joined[i].y});
@@ -2073,25 +2090,25 @@ function loop(ts){
         for(let i=1;i<pts.length;i++) g.lineTo(pts[i].x,pts[i].y); };
       // 外側のもや → 内側の芯、の3層で気体っぽく
       // ★色は味方（ミント）と変える。同色だとオン/オフが分からない
-      g.strokeStyle='rgba(60,200,255,'+(0.13*aura)+')';  g.lineWidth=R*1.60*pu; trace(); g.stroke();
-      g.strokeStyle='rgba(130,235,255,'+(0.16*aura)+')'; g.lineWidth=R*0.98*pu; trace(); g.stroke();
-      g.strokeStyle='rgba(225,252,255,'+(0.20*aura)+')'; g.lineWidth=R*0.44*pu; trace(); g.stroke();
+      g.strokeStyle='rgba(60,200,255,'+(0.13*gA)+')';  g.lineWidth=R*1.60*pu; trace(); g.stroke();
+      g.strokeStyle='rgba(130,235,255,'+(0.16*gA)+')'; g.lineWidth=R*0.98*pu; trace(); g.stroke();
+      g.strokeStyle='rgba(225,252,255,'+(0.20*gA)+')'; g.lineWidth=R*0.44*pu; trace(); g.stroke();
     }
     // 先頭はいちばん濃い
     const ag=g.createRadialGradient(head.x,head.y,R*0.15,head.x,head.y,R*pu);
-    ag.addColorStop(0,'rgba(235,253,255,'+(0.34*aura)+')');
-    ag.addColorStop(0.55,'rgba(110,225,255,'+(0.16*aura)+')');
+    ag.addColorStop(0,'rgba(235,253,255,'+(0.34*gA)+')');
+    ag.addColorStop(0.55,'rgba(110,225,255,'+(0.16*gA)+')');
     ag.addColorStop(1,'rgba(70,190,255,0)');
     g.fillStyle=ag; g.beginPath(); g.arc(head.x,head.y,R*pu,0,7); g.fill();
     // 列の縁をなぞる淡い輪郭＝どこまで酸が届くかが分かる
     if(pts.length>1){
       // 外周をなぞる細い光の線＝どこまで酸が届くかの境目をはっきり出す
       g.globalCompositeOperation='source-over';
-      g.strokeStyle='rgba(190,248,255,'+(0.50*aura)+')';
+      g.strokeStyle='rgba(190,248,255,'+(0.50*gA)+')';
       g.lineWidth=R*1.60*pu; g.lineCap='round'; g.lineJoin='round';
       g.save(); g.beginPath(); g.moveTo(pts[0].x,pts[0].y);
       for(let i=1;i<pts.length;i++) g.lineTo(pts[i].x,pts[i].y);
-      g.globalAlpha=0.55*aura; g.setLineDash([7,9]); g.lineDashOffset=-clock*70;
+      g.globalAlpha=0.55*gA; g.setLineDash([7,9]); g.lineDashOffset=-clock*70;
       g.lineWidth=1.6; g.stroke(); g.restore();
     }
     g.restore();
@@ -2167,7 +2184,7 @@ function loop(ts){
       +' 再生'+sndPlays+(acErr?' '+acErr:''), 14, H-90);
     g.fillStyle= aura>0.35? '#9be8ff':'#bfe9d2';
     g.fillText('速さ '+Math.round(headSpd)+' px/s', 14, H-72);
-    g.fillText('オーラ '+aura.toFixed(2)+(aura>0.35?'  ON':'  off'), 14, H-54);
+    g.fillText('オーラ '+aura.toFixed(2)+(aura>0.35?'  ON':(auraTail>0?'  余韻'+auraTail.toFixed(2):'  off')), 14, H-54);
     g.fillStyle='#7a8a86';
     g.fillText('旋回半径 '+Math.round(Math.min(9999,turnR))+'px', 14, H-36);
     g.fillText('鎖 '+joinedCount+'  味方 '+livingRods()+'  敵 '+livingFoes(), 14, H-20);
