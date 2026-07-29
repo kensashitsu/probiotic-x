@@ -175,7 +175,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v97 (07-30 08:21)';
+const BUILD='v98 (07-30 08:26)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -372,6 +372,7 @@ const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めてい�
 let parkT=0, camW=1, isMouse=false;
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
+let comboSeen=false;
 let aura=0, auraTail=0, saveSeen=false, guardOn=false, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
 function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
@@ -791,6 +792,11 @@ let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
 let bits=[];   // 溶けカス粒子
 let seals=[];  // 封印フラッシュ {poly,life}
 let shards=[]; // シャッターの破片フラッシュ
+// ★8の字などで続けて溶かした時のコンボ。2回目以降は鎖を消費しない＝腕前がそのまま得になる。
+//   時間だけで判定するので、一筆でも別のなぞりでも続けられる
+const COMBO_T=+(_q.get('combot')||1.4);          // 次の封印までの猶予(秒)
+const COMBO_FREE=(_q.get('combofree')!=='0');    // 2回目以降は鎖を使わない
+let combo=0, comboT=-9, pops=[];
 let best=+(localStorage.getItem('sealBest')||0);
 let totalSealed=0;
 let hitCd=0;   // 衝突クールダウン
@@ -806,7 +812,7 @@ function scatter(){
       wa:rnd(0,6.283), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
   }
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
-  bits=[]; seals=[]; shards=[]; totalSealed=0; hitCd=0; shake=0;
+  bits=[]; seals=[]; shards=[]; pops=[]; combo=0; comboT=-9; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; lead={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
@@ -1066,7 +1072,14 @@ function doSeal(poly){
     fizz(0, joinedCount);
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
   }
-  if(sealed>0||shrunk>0) spendChain(SEAL_COST);   // 溶かしても靄を削っても1回1匹
+  // ★コンボ：続けて溶かせたら鎖を使わない（8の字で2つ続けて囲む、が報われる）
+  let free=false;
+  if(sealed>0){
+    combo = (clock-comboT<=COMBO_T)? combo+1 : 1;
+    comboT=clock;
+    free = COMBO_FREE && combo>=2;
+  }
+  if((sealed>0||shrunk>0) && !free) spendChain(SEAL_COST);   // 溶かしても靄を削っても1回1匹
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
@@ -1075,7 +1088,16 @@ function doSeal(poly){
     fizz(sealed, joinedCount);
     // ※倒した分を湧き直させない。腐敗菌は自分で増えるのが唯一の供給源なので、
     //   押し切れば本当に減っていく＝ゲージが進む
-    if(sealed>=3) tipMsg(sealed+'匹まとめて溶かした！');
+    if(combo>=2){
+      // 輪の中心にコンボを出す
+      let cx=0, cy=0; for(const q of poly){ cx+=q.x; cy+=q.y; }
+      cx/=poly.length; cy/=poly.length;
+      pops.push({x:cx, y:cy, n:combo, life:1, free:free});
+      comboSnd(combo);
+      if(!comboSeen){ comboSeen=true;
+        tipMsg('コンボ！ 続けて囲むと鎖を使わない ─ 8の字で二つまとめて'); }
+    }
+    else if(sealed>=3) tipMsg(sealed+'匹まとめて溶かした！');
   }else{
     fizz(0, joinedCount);
   }
@@ -1508,6 +1530,20 @@ function fizz(count,strong){ if(!A||!sndOK('fizz'))return; try{
 }catch(e){} }
 
 // 酸が足りず耐えられた時の"にごった"音
+// コンボの音。数が伸びるほど高く、短く重ねる
+function comboSnd(n){ if(!A||muted)return; try{
+  const t=A.currentTime, k=Math.min(8,n);
+  for(let i=0;i<2;i++){
+    const o=A.createOscillator(), g2=A.createGain();
+    o.type='triangle';
+    o.frequency.setValueAtTime(520*Math.pow(1.14,k)+i*180, t+i*0.045);
+    g2.gain.setValueAtTime(0.0001,t+i*0.045);
+    g2.gain.exponentialRampToValueAtTime(0.075,t+i*0.045+0.012);
+    g2.gain.exponentialRampToValueAtTime(0.0001,t+i*0.045+0.16);
+    o.connect(g2).connect(A.destination); o.start(t+i*0.045); o.stop(t+i*0.045+0.18);
+  }
+  sndPlays++;
+}catch(e){} }
 function resistSnd(n){ if(!A||!sndOK('resist'))return; try{
   const t=A.currentTime, dur=0.26;
   const o=A.createOscillator(), og=A.createGain();
@@ -2113,6 +2149,24 @@ function loop(ts){
   g.setLineDash([10,10]); g.lineDashOffset=-clock*8;
   g.strokeRect(EDGE_M,PLAY_TOP+EDGE_M,worldW()-EDGE_M*2,worldBot()-PLAY_TOP-EDGE_M*2);
   g.restore();
+
+  // コンボの表示。数が大きいほど大きく、ゆっくり浮いて消える
+  for(let i=pops.length-1;i>=0;i--){
+    const o=pops[i]; o.life-=dt*1.15;
+    if(o.life<=0){ pops.splice(i,1); continue; }
+    const t=1-o.life, y=o.y-24*t, sc=1+Math.min(6,o.n)*0.16+(1-o.life)*0.25;
+    g.save(); g.globalAlpha=Math.min(1,o.life*1.8);
+    g.textAlign='center'; g.textBaseline='middle';
+    g.font='800 '+(15*sc).toFixed(1)+'px system-ui,-apple-system,sans-serif';
+    g.lineWidth=3; g.strokeStyle='rgba(6,14,12,.85)';
+    g.strokeText('×'+o.n, o.x, y); 
+    g.fillStyle= o.n>=4? '#ffe6a0' : '#bfffe0';
+    g.fillText('×'+o.n, o.x, y);
+    if(o.free){ g.font='800 '+(9.5*Math.min(sc,1.5)).toFixed(1)+'px system-ui,-apple-system,sans-serif';
+      g.strokeText('鎖を使わない', o.x, y+13*sc*0.8);
+      g.fillStyle='rgba(200,255,230,.9)'; g.fillText('鎖を使わない', o.x, y+13*sc*0.8); }
+    g.restore();
+  }
 
   // アンモニアの靄（敵の攻撃）＝酸を中和する領域。
   // 輪郭のある円だと"紫の玉"に見えてしまうので、ずれた靄を重ねて気体に見せる
