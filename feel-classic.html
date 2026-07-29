@@ -174,7 +174,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v94 (07-30 07:04)';
+const BUILD='v95 (07-30 07:21)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1391,13 +1391,17 @@ function pointBack(d){
 let A=null, acUnlocked=false, acErr='', sndPlays=0, chimed=false;
 // デバッグ表示：?dbg=1 でも、左下のバージョンを3回タップでも出せる
 let dbgOn=(_q.get('dbg')==='1'), dbgTap=0, dbgTapT=-9;
-// ★ホーム画面から起動（スタンドアロン）すると、iOSは音を「環境音」扱いにするため
-//   本体の消音スイッチや音量で丸ごと消えることがある。Safariのタブでは鳴るのに
-//   ホーム画面からだと鳴らない、という差はここ。'playback' を宣言すると音楽と同じ扱いになる。
-//   （WebKitのみ・iOS16.4以降。無ければ何も起きない）
+// ★音の扱い（WebKitのみ・iOS16.4以降。無ければ何も起きない）
+//   'ambient'  = 消音スイッチ（マナーモード）で黙る。ゲームとして普通の挙動
+//   'playback' = 音楽と同じ扱い＝消音スイッチを無視して鳴る
+//   v78で「ホーム画面起動だと鳴らない」対策として 'playback' にしたが、
+//   マナーモードでも鳴ってしまうため 'ambient' に戻す。
+//   ?session=playback で以前の挙動に戻せる（ホーム画面起動で無音になる時の切り分け用）
+const AC_SESSION=(function(){ const v=new URLSearchParams(location.search).get('session');
+  return (v==='playback'||v==='ambient'||v==='auto')? v : 'ambient'; })();
 function audioSession(){
-  try{ if(navigator.audioSession && navigator.audioSession.type!=='playback')
-         navigator.audioSession.type='playback'; }catch(e){}
+  try{ if(navigator.audioSession && navigator.audioSession.type!==AC_SESSION)
+         navigator.audioSession.type=AC_SESSION; }catch(e){}
 }
 audioSession();
 function ac(){
@@ -2467,7 +2471,7 @@ function loop(ts){
     g.font='700 12px system-ui,-apple-system,sans-serif'; g.textAlign='left'; g.textBaseline='top';
     g.fillStyle='rgba(0,0,0,.62)'; g.fillRect(8,H-96,224,88);
     g.fillStyle= (A&&A.state==='running')? '#8ff0c0':'#ff9a80';
-    g.fillText('音 '+(A? A.state:'未作成')+(acUnlocked?' 解錠':' 未解錠')
+    g.fillText('音 '+(A? A.state:'未作成')+(acUnlocked?' 解錠':' 未解錠')+' '+AC_SESSION
       +' 再生'+sndPlays+(acErr?' '+acErr:''), 14, H-90);
     g.fillStyle= aura>0.35? '#9be8ff':'#bfe9d2';
     if(MIX) g.fillText((mixSteer?'移動(相対)':'囲む(絶対)')+'  ずれ'+Math.round(Math.hypot(lead.x,lead.y))+'px', 200, H-20);
