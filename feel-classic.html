@@ -83,7 +83,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v71 (07-29 13:44)';
+const BUILD='v72 (07-29 13:49)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1032,12 +1032,33 @@ let dbgOn=(_q.get('dbg')==='1'), dbgTap=0, dbgTapT=-9;
 function ac(){
   if(!A){ try{ A=new (window.AudioContext||window.webkitAudioContext)(); }
           catch(e){ acErr='ctx'; return A; } }
-  if(A && A.state==='suspended'){ try{ A.resume(); }catch(e){} }
+  if(A && A.state!=='running'){ try{ A.resume(); }catch(e){} }
   if(A && !acUnlocked){          // タップ中に1サンプルの無音を鳴らして解錠
     try{ const b=A.createBuffer(1,1,22050), s2=A.createBufferSource();
-         s2.buffer=b; s2.connect(A.destination); s2.start(0); acUnlocked=true; }catch(e){}
+         s2.buffer=b; s2.connect(A.destination); s2.start(0); }catch(e){}
+    if(A.state==='running'){ acUnlocked=true; startChime(); }
   }
   return A;
+}
+// ★解錠は touchstart だけに頼らない。前作はボタンの click で解錠していて問題が無かったのに対し、
+//   こちらは canvas の touchstart(+preventDefault) で、iOSだと解錠に失敗することがある。
+//   触れる系のイベント全部で試し、成功した瞬間に短い起動音を鳴らして「鳴る状態か」を耳で分かるようにする
+['touchstart','touchend','pointerdown','pointerup','click','mousedown'].forEach(ev=>{
+  document.addEventListener(ev, ()=>{ ac(); }, {capture:true, passive:true});
+});
+function startChime(){
+  try{
+    const t=A.currentTime;
+    [660,990].forEach((f,i)=>{
+      const o=A.createOscillator(), g2=A.createGain();
+      o.type='sine'; o.frequency.value=f;
+      g2.gain.setValueAtTime(0.0001,t+i*0.09);
+      g2.gain.exponentialRampToValueAtTime(0.16,t+0.02+i*0.09);
+      g2.gain.exponentialRampToValueAtTime(0.0001,t+0.28+i*0.09);
+      o.connect(g2).connect(A.destination); o.start(t+i*0.09); o.stop(t+0.34+i*0.09);
+    });
+    sndPlays++;
+  }catch(e){}
 }
 // 鳴らしすぎ防止（実機で重くならないよう、音ごとに最短間隔を設ける）
 const SND_GAP={pop:60, fizz:110, crack:90, brk:150, burst:150, div:260, bump:260,
