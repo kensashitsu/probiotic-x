@@ -25,6 +25,12 @@
   #bar .cap{position:absolute;top:0;bottom:0;display:flex;align-items:center;
     font-size:11px;font-weight:800;letter-spacing:.08em}
   #bar .cl{left:9px;color:#08281e}
+  /* 押し合っている境目のすぐ両脇に、今の割合を出す */
+  #pcL,#pcR{position:absolute;top:0;bottom:0;display:flex;align-items:center;
+    font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums;
+    letter-spacing:.01em;pointer-events:none;white-space:nowrap}
+  #pcL{left:0;justify-content:flex-end;padding-right:6px;color:#08281e}
+  #pcR{right:0;justify-content:flex-start;padding-left:6px;color:#ffe0d2}
   #bar .cr{right:9px;color:#ffd8c8}
   #nums{display:flex;align-items:center;gap:9px;margin-top:5px;font-size:11px;color:#7f8f95;
     font-variant-numeric:tabular-nums}
@@ -59,6 +65,7 @@
     <div id="barL"></div>
     <div id="barMid"></div>
     <div class="cap cl">乳酸</div><div class="cap cr">腐敗</div>
+    <div id="pcL">50%</div><div id="pcR">50%</div>
   </div>
   <div id="nums">
     <span class="foodname" id="foodname">ぬか床</span>
@@ -76,12 +83,13 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v59 (07-29 11:13)';
+const BUILD='v60 (07-29 11:15)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
 const elAlly=document.getElementById('nAlly'), elFoe=document.getElementById('nFoe');
 const elBarL=document.getElementById('barL'), elBarMid=document.getElementById('barMid');
+const elPcL=document.getElementById('pcL'), elPcR=document.getElementById('pcR');
 const elTime=document.getElementById('tleft');
 const elOver=document.getElementById('over'), elOverT=document.getElementById('overTtl'),
       elOverS=document.getElementById('overSub');
@@ -690,10 +698,23 @@ function doSeal(poly){
   }
   if(resisted>0){ resistSnd(resisted); if(sealed===0) tipMsg('靄の中では酸が効かない！ 靄が晴れるまで待つか、外の敵を狙え'); }
 }
+let lastPc=-1;
 function updateBar(){
   const p=(gauge*100);
   elBarL.style.width=p.toFixed(1)+'%';
   elBarMid.style.left=p.toFixed(1)+'%';
+  // 境目の両脇に今の割合を出す。端に寄りすぎて数字が切れないよう内側で止める
+  const q=Math.round(p);
+  if(q!==lastPc){
+    lastPc=q;
+    elPcL.textContent=q+'%'; elPcR.textContent=(100-q)+'%';
+  }
+  const w=Math.max(17,Math.min(83,p));
+  elPcL.style.width=w.toFixed(1)+'%';
+  elPcR.style.left =w.toFixed(1)+'%';
+  // 片側が狭いと数字が相手の色の上に乗るので、文字色を入れ替えて読めるようにする
+  elPcL.style.color = (p<20)? '#f0fbf6' : '#08281e';
+  elPcR.style.color = (p>80)? '#0b2119' : '#ffe0d2';
 }
 function finishGame(win,how){
   phase= win? 'win':'lose';
