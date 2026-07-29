@@ -76,7 +76,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v47 (07-29 09:44)';
+const BUILD='v48 (07-29 09:56)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -135,12 +135,12 @@ const CHAIN_MAX=+(_q.get('chain')||7);   // 連鎖の最大の長さ
 //   間に合わなければ死滅＝数が減る。走る＝安全だが囲めない／囲む＝減速して危険、という
 //   緊張が生まれる。オーラの大きさは繋いだ数で決まる＝ここでも繋ぐ意味が出る
 // ★判定は「指の画面上の速さ」。実機だと囲む動きでも毎秒700px前後は普通に出るので、
-//   閾値はかなり高くする（意識して払った時だけ）。さらに一瞬の振れで点かないよう、
-//   点灯には約0.1秒の立ち上がりを持たせる
-const AURA_LO=+(_q.get('auralo')||1100);  // 指がこの速さを超えるとオーラが出始める(px/秒)
-const AURA_HI=+(_q.get('aurahi')||1900);  // ここで最大
-const AURA_R0=+(_q.get('aura0')||26);     // オーラの基準半径
-const AURA_PER=+(_q.get('aurap')||1.5);   // 桿菌1匹あたり広がる分
+//   実測での調整：520px/sだと常時オン、1100px/sだと実機で一度も点かなかった。
+//   その中間（700〜1250、効果が出るのは約900px/s）。?dbg=1 で指の速さを画面に出せる
+const AURA_LO=+(_q.get('auralo')||700);   // 指がこの速さを超えるとオーラが出始める(px/秒)
+const AURA_HI=+(_q.get('aurahi')||1250);  // ここで最大
+const AURA_R0=+(_q.get('aura0')||40);     // オーラの基準半径（短い列でも見える大きさ）
+const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
 let aura=0, auraFlash=0, headSpd=0, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
@@ -1620,6 +1620,17 @@ function loop(ts){
     // 今見えている範囲
     g.strokeStyle='rgba(200,255,230,.4)'; g.lineWidth=1;
     g.strokeRect(mx+cam.x*sx, my+Math.max(0,cam.y-PLAY_TOP)*sy, viewW()*sx, Math.min(mh, viewH()*sy));
+    g.restore();
+  }
+  // ?dbg=1 で指の速さとオーラを画面に出す（実機で閾値を合わせるため）
+  if(_q.get('dbg')==='1'){
+    g.save();
+    g.font='700 12px system-ui,-apple-system,sans-serif'; g.textAlign='left'; g.textBaseline='top';
+    g.fillStyle='rgba(0,0,0,.55)'; g.fillRect(8,H-58,150,50);
+    g.fillStyle= aura>0.35? '#9be8ff':'#bfe9d2';
+    g.fillText('指 '+Math.round(headSpd)+' px/s', 14, H-52);
+    g.fillText('オーラ '+aura.toFixed(2)+(aura>0.35?'  ON':'  off'), 14, H-34);
+    g.fillStyle='#7a8a86'; g.fillText('点灯 '+AURA_LO+'〜'+AURA_HI, 14, H-18);
     g.restore();
   }
   prevHead.x=head.x; prevHead.y=head.y;
