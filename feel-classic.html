@@ -83,7 +83,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v60 (07-29 11:15)';
+const BUILD='v61 (07-29 11:24)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -144,13 +144,15 @@ const CHAIN_MAX=+(_q.get('chain')||10);  // 連鎖の最大の長さ
 //   緊張が生まれる。オーラの大きさは繋いだ数で決まる＝ここでも繋ぐ意味が出る
 // ★判定は「指の画面上の速さ」。実機だと囲む動きでも毎秒700px前後は普通に出るので、
 //   ?dbg=1 で「今の速さ・オーラ値・閾値」を画面に出せる（実機で詰めるため）
+const TURN_R_LO=+(_q.get('trlo')||200);   // 旋回半径がこれ以下なら出ない（囲む動き）
+const TURN_R_HI=+(_q.get('trhi')||420);   // これ以上なら疾走扱い（纏ったまま曲がれる）
 const AURA_LO=+(_q.get('auralo')||800);   // この速さを超えるとオーラが出る(px/秒)
 const AURA_HI=+(_q.get('aurahi')||1300);  // ここで最大
 const AURA_R0=+(_q.get('aura0')||40);     // オーラの基準半径（短い列でも見える大きさ）
 const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
-let aura=0, auraFlash=0, headSpd=0, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
+let aura=0, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
 function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
 const FOE_R=RW*FOE_K/2;                       // 腐敗菌の半径
@@ -403,7 +405,7 @@ let linkT=0;
 // ★浮遊中の敵と味方がぶつかったら、互いに弾かれて連鎖から外れる。
 //   死滅はさせない（プレイヤーの操作と無関係に数が減ると腕前が結果に出なくなる）
 const BUMP_EVERY=0.08;
-let bumpT=0, bumpSndT=-9;
+let bumpT=0, bumpSndT=-9, ringT=0;
 const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
 const WIN_AT=0.94, LOSE_AT=0.06;
 const TIME_LIMIT=+(_q.get('time')||90);
@@ -524,6 +526,14 @@ function moveTo(x,y){
 function end(){ dragging=false; }
 // ---- 漂っている個体同士をくっつける ----
 // link = 自分の1つ前 ／ next = 自分の1つ後ろ。先頭は link が無く、末尾は next が無い。
+// 連鎖に輪ができていたら切る（起きないはずだが、起きると画面が固まるので保険）
+function breakRings(list){
+  for(const o of list){
+    let c=o, n=0;
+    while(c.link && n++<80) c=c.link;
+    if(n>=80){ o.link=null; o.next=null; o.clen=0; }
+  }
+}
 function chainHead(o){ let c=o,n=0; while(c.link&&!c.link.dead&&n++<64) c=c.link; return c; }
 function chainLen(o){ let c=chainHead(o),n=1; while(c.next&&!c.next.dead&&n<64){ c=c.next; n++; } return n; }
 function tryLink(list, cap, radius, ok){
@@ -813,10 +823,11 @@ function auraBurst(){
     if(bursts>=3) continue;                                            // 1フレームに弾く連鎖は3本まで
     bursts++;
     // その連鎖を全部たどって切り離す
-    const list=[]; let cur=f;
-    while(cur&&!cur.dead){ list.push(cur); cur=cur.link&&!cur.link.dead? cur.link:null; }
-    cur=f.next;
-    while(cur&&!cur.dead){ list.push(cur); cur=cur.next&&!cur.next.dead? cur.next:null; }
+    // ※万一おかしな繋がり方が起きても止まらないよう、たどる数に上限を付ける
+    const list=[]; let cur=f, guard=0;
+    while(cur&&!cur.dead&&guard++<64){ list.push(cur); cur=cur.link&&!cur.link.dead? cur.link:null; }
+    cur=f.next; guard=0;
+    while(cur&&!cur.dead&&guard++<64){ list.push(cur); cur=cur.next&&!cur.next.dead? cur.next:null; }
     if(list.length<2) continue;
     for(const c of list){
       c.link=null; c.next=null; c.clen=0; c.sos=SOS_T;
@@ -1260,15 +1271,21 @@ function loop(ts){
     auraPF.x=finger.x; auraPF.y=finger.y;
     const fs=Math.min(4000, Math.hypot(camVel.x,camVel.y) + fspd);
     headSpd = (fs>headSpd)? fs : Math.max(fs, headSpd-headSpd*dt*3.2);
-    // ★旋回では消さない。「纏っている＝囲えない」で既に排他になっているので、
-    //   曲がり方で制限する必要が無い（囲みたければ減速する＝どのみち必要な操作）。
-    //   旋回半径で切っていた時は「纏ったまま曲がれない」不満が出た。速さだけで判定する。
+    // ★「速さ」と「旋回半径」の両方で決める。片方だけでは両立しない：
+    //   ・速さだけ → 素早く囲もうとすると点いてしまい囲えない
+    //   ・曲がる速さだけ → 纏ったまま進路変更ができない
+    //   半径で見れば、大きく曲がる（疾走の進路変更）＝纏ったまま、
+    //   小さく巻き込む（輪を作る動き）＝解除、と両方成立する。
+    //   巻き込み始めた瞬間に解除されるよう、狭まる側も素早く追従させる
+    const tr=headSpd/Math.max(0.6,turnRate);
+    turnR += (tr-turnR)*Math.min(1, dt*(tr>turnR? 18:16));
+    const gate=Math.max(0,Math.min(1,(turnR-TURN_R_LO)/(TURN_R_HI-TURN_R_LO)));
     // 触った直後の一瞬は出さない。ここで点くと最初の1匹が拾えず、
     //   囲み始めも潰れる（カメラも同じ理由で開始直後は流さない）
     // ※0.25秒だと走り出しの"指の振り"まで食べてしまい点灯が0.5秒遅れた。
     //   最初の1匹は touchstart 時点で拾えているので、抑制は最小限で足りる
     const start0=(clock-strokeT0<0.12)?0:1;
-    const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*start0;
+    const want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*gate*start0;
     const wasArmed=aura>0.35;
     aura += (want-aura)*Math.min(1,dt*(want>aura?22:5));   // 点くのは素早く、消えるのは緩やか
     if(!wasArmed && aura>0.35){ auraOnSnd(); auraFlash=1; }
@@ -1286,7 +1303,8 @@ function loop(ts){
 
     // ① 腐敗菌が二分裂する（酸が弱いほど速い）
     foeAcc += GF*nF*room*foeSuppress()*dt;
-    while(foeAcc>=1){
+    let dg=0;
+    while(foeAcc>=1 && dg++<40){          // 1フレームで処理する上限（保険）
       foeAcc-=1;
       const src=foes.filter(f=>!f.dead&&!f.div);
       const par=src[(Math.random()*src.length)|0];
@@ -1333,7 +1351,8 @@ function loop(ts){
 
     // ③ 乳酸菌も二分裂する（酸が優勢なほど速い）＝知育の芯
     allyAcc += GA*nA*room*allyBoost()*dt;
-    while(allyAcc>=1){
+    let dg2=0;
+    while(allyAcc>=1 && dg2++<40){        // 1フレームで処理する上限（保険）
       allyAcc-=1;
       const src=rods.filter(r=>!r.joined&&!r.dying&&!r.div);
       const par=src[(Math.random()*src.length)|0];
@@ -1414,9 +1433,13 @@ function loop(ts){
           if(Math.abs(f.vx)<3&&Math.abs(f.vy)<3){ f.vx=0; f.vy=0; } }
         // 近くの仲間へ寄っていく（相手は連鎖の端＝まだ娘がいない個体）
         let tg=null, td=1e9;
+        const myHead=chainHead(f);
         for(const o of foes){
           if(o===f||o.dead||o.sos!=null) continue;
           if(o.next&&!o.next.dead) continue;
+          // ★自分と同じ連鎖の末尾に繋ぐと輪（サイクル）ができ、
+          //   連鎖をたどる while が永久に回ってフリーズする（PCで実際に発生）
+          if(chainHead(o)===myHead) continue;
           const d=Math.hypot(o.x-f.x,o.y-f.y); if(d<td){ td=d; tg=o; }
         }
         if(tg){
@@ -1450,6 +1473,9 @@ function loop(ts){
       if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
       if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
     }
+    // 保険：輪（サイクル）ができていないか定期的に点検して切る
+    ringT-=dt;
+    if(ringT<=0){ ringT=1.0; breakRings(foes); breakRings(rods); }
     // 浮遊中の敵味方がぶつかったら互いに弾ける
     bumpT-=dt; if(bumpT<=0){ bumpT=BUMP_EVERY; bumpAll(); }
     // 近づいたもの同士を繋ぐ（分裂以外でも連鎖が育つ）
