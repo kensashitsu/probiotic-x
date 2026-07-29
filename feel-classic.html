@@ -83,7 +83,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v64 (07-29 12:04)';
+const BUILD='v65 (07-29 12:10)';
 try{ document.getElementById('ver').textContent=BUILD; }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
@@ -346,7 +346,11 @@ const DOOM_WARN=2.6;          // 残りこの秒数で点滅予告
 //   鎖を大量に払えば中和して溶かせる。靄が「手出しできない障害物」から
 //   「払って突破するか、避けて別を狙うか」の判断に変わる＝長い鎖の使い道になる。
 //   （一律に消耗させる案は、囲むたびに拾い直しが要って作業感が出たので却下）
-const HAZE_COST=+(_q.get('haze')||8);   // 靄の中の1体を溶かすのに要る桿菌の数
+// ★靄は「囲うたびに中和されて縮む」。一発で払って貫通するのではなく、
+//   何度もグルグル囲って削っていく＝効いているのが目に見える。
+//   削れる量は繋いだ数で増えるので、長い鎖ほど少ない手数で晴らせる
+const AM_CUT0=+(_q.get('cut0')||9);     // 1回の封印で削れる半径（基本）
+const AM_CUT1=+(_q.get('cut1')||0.55);  // 桿菌1匹あたり追加で削れる量
 // ★封印1回につき鎖を1匹使う（何匹溶かしても1匹）。コストは軽いまま
 //   「まとめて大きく囲うほど得」が効き、鎖の長さ＝封印できる回数になる
 const SEAL_COST=+(_q.get('seal')||1);
@@ -712,24 +716,24 @@ function doSeal(poly){
     f.dead=true; f.dt=0; sealed++;
     for(let i=0;i<12;i++) bits.push({x:f.x,y:f.y, vx:rnd(-1.3,1.3),vy:rnd(-1.7,0.4), life:1, r:rnd(1.5,3.6)});
   }
-  // ★靄の中の敵は、鎖を大量に払えば中和して溶かせる
-  if(hazed.length){
-    const canPay=Math.floor(joinedCount/HAZE_COST);
-    const n=Math.min(canPay, hazed.length);
-    for(let i=0;i<n;i++){
-      const f=hazed[i];
-      f.dead=true; f.dt=0; sealed++; paid+=HAZE_COST;
-      for(let k=0;k<18;k++) bits.push({x:f.x,y:f.y, vx:rnd(-1.8,1.8),vy:rnd(-2.2,0.6), life:1, r:rnd(1.6,4.0)});
-      shards.push({x:f.x,y:f.y,life:1,good:true});
-    }
-    for(let i=n;i<hazed.length;i++){ hazed[i].resist=1; resisted++; }
-    if(n>0){
-      spendChain(paid);
-      if(!hazeSeen){ hazeSeen=true; tipMsg('アンモニアを中和して溶かした！ 鎖を'+HAZE_COST+'匹分使う'); }
-    }else if(!hazeSeen2){ hazeSeen2=true;
-      tipMsg('靄の中の菌には鎖が'+HAZE_COST+'匹分要る ─ もっと繋いでから囲め'); }
+  // ★靄そのものを中和して縮める。輪が靄に掛かっていれば削れる
+  let shrunk=0;
+  for(const a of ammo){
+    let hit=pointInPoly(a.x,a.y,poly);
+    if(!hit){ for(const q of poly){ if(Math.hypot(q.x-a.x,q.y-a.y)<a.r){ hit=true; break; } } }
+    if(!hit) continue;
+    a.max=(a.max||AM_R) - (AM_CUT0+AM_CUT1*joinedCount)*SCALE;
+    shrunk++;
+    for(let i=0;i<10;i++) bits.push({x:a.x+rnd(-1,1)*a.r*0.6, y:a.y+rnd(-1,1)*a.r*0.6,
+      vx:rnd(-1.2,1.2), vy:rnd(-1.6,0.3), life:.9, r:rnd(1.2,2.8)});
   }
-  if(sealed>0) spendChain(SEAL_COST);      // 何匹溶かしても1回1匹
+  // 靄に守られている敵はまだ溶けない（靄を削り切ってから）
+  for(const f of hazed){ f.resist=1; resisted++; }
+  if(shrunk>0){
+    fizz(0, joinedCount);
+    if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
+  }
+  if(sealed>0||shrunk>0) spendChain(SEAL_COST);   // 溶かしても靄を削っても1回1匹
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
@@ -1392,13 +1396,13 @@ function loop(ts){
         amAcc-=1;
         const src=foes.filter(f=>!f.dead);
         const f0=src[(Math.random()*src.length)|0];
-        if(f0){ ammo.push({x:f0.x,y:f0.y,r:AM_R*0.3,t:0,life:AM_LIFE,ph:rnd(0,6.28)});
+        if(f0){ ammo.push({x:f0.x,y:f0.y,r:AM_R*0.3,max:AM_R,t:0,life:AM_LIFE,ph:rnd(0,6.28)});
           if(!amSeen){ amSeen=true; tipMsg('アンモニアで酸が中和される！ 靄の中では溶かせない'); } }
       }
     }
     for(let i2=ammo.length-1;i2>=0;i2--){ const a=ammo[i2]; a.t+=dt;
-      a.r=AM_R*(0.3+0.7*Math.min(1,a.t/1.2));
-      if(a.t>=a.life) ammo.splice(i2,1); }
+      a.r=(a.max||AM_R)*(0.3+0.7*Math.min(1,a.t/1.2));
+      if(a.t>=a.life || (a.max||AM_R)<AM_R*0.22) ammo.splice(i2,1); }
 
     // ③ 乳酸菌も二分裂する（酸が優勢なほど速い）＝知育の芯
     allyAcc += GA*nA*room*allyBoost()*dt;
