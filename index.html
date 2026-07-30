@@ -38,7 +38,7 @@
 味方は<b>球菌（ロイコノストック等）</b>＝漬物の初期発酵の主役で、実際に数珠状に連なります。</div>
 
 <h2>■ 却下：pH版（囲った場所が酸性として残る）</h2>
-<a class="card dim" href="feel-ph.html?v=114">
+<a class="card dim" href="feel-ph.html?v=115">
   <span class="tag">却下</span>
   <div class="name">ぬか床を漬ける ─ pHを下げる縄張り争い</div>
   <div class="desc"><b style="color:#ff9a80">ユーザー評「アイデア自体は良いかと思ったが、非常にゲームとしてはとても分かりづらく、爽快感もなくなってしまった」。</b>
@@ -97,7 +97,7 @@
 端末名は「プロバイオティＸ」）。あそびかたは今は読む形で、体験型は次の課題。</div>
 
 <div class="desc" style="margin:0 0 8px">PCで実機の大きさを確認： <a href="feel-classic.html?sim=se3p&z=1.4">SE3の縦（375×667, 1.4倍表示）</a> ／ <a href="feel-classic.html?sim=se3&orient=land&z=2">SE3の横（667×375, 2倍表示）</a> ／ <a href="feel-classic.html?sim=se3bar&z=2">アドレスバーあり（667×290）</a> ／ <a href="feel-classic.html?sim=se3pbar&z=1.4">縦・アドレスバーあり（375×553）</a><br><code>?sim=667x375</code> のように直接指定も可。<code>?z=2</code> は見かけの倍率（実機の画素数は変わりません）。</div>
-<a class="card" href="feel-classic.html?v=114">
+<a class="card" href="feel-classic.html?v=115">
   <span class="tag t-new">これ</span>
   <div class="name">ズタッと囲う ─ 目的とバランスが入った（縦画面）</div>
   <div class="desc" style="margin-bottom:10px"><b>※ 一度横画面専用にしたが、縦に戻した（v93）。</b>横で一通り試した上での判断。横向きの実装は残してあるので <code>?orient=land</code> で戻せる。<br>
@@ -152,6 +152,13 @@
   <b>⑤ オーラで弾薬が減っているのを見えるようにし、消費を倍以上にしました（毎秒0.8→1.8匹）。</b>燃えて消えるのは尻尾＝画面外になりがちだったので、<b>指先のバッジに「燃焼計」</b>を付けました——一周したら1匹消える溝つきの弧が回り、減った瞬間に<b>バッジが弾けて数字が青く光り</b>、指元にも<b>青い「−1」</b>が出ます（溶かして払った分＝白と区別）。実測：纏って0.85秒で3匹消費、燃焼計は0→0.99で一周。<code>?burn=0.8</code> で以前の量に戻せます。<br>
   <b>⑥ 纏っている間はオーラ音が鳴り続けます。</b>点火音の一発だけでは「今纏っているか」が耳では分かりませんでした。ノイズ（酸が噴く音）と低い唸りを1本ずつ作って<b>gainの出し入れだけで鳴らし</b>（毎回作り直すと実機で詰まる）、<b>速く走るほど高く張ります</b>。消音・指を離した時・決着で必ず止めます。<br>
   <b>⑦ 敵の攻撃をビームから「酵素」に変えました。</b>まっすぐな線は知育らしくなかったので、実際に起きていること＝<b>タンパク分解酵素を吹きかけて溶かし、栄養を吸い上げる</b>を粒の流れで描きます。<b>桃色の粒がふらつきながら飛び</b>、届いた所が<b>内へ縮む破線の輪で分解</b>され、<b>ミントの粒（栄養）が腐敗菌へ逆流</b>します。線は1本も引きません。<code>?atk=beam</code> で以前の線に戻せます。<br>
+  <b>■ 「溜めてから大きく囲う」は残す（v115）</b>──酸切れを常時にしたら、
+  今度は<b>溜める楽しみ（大きく囲う）が消えました</b>。そこで<b>猶予</b>を置きました：
+  <b>18匹までは1匹も抜けません</b>。超えた分だけが尻尾から抜けます
+  （毎秒 <b>超過×0.14匹</b>＝20匹で0.28／25匹で0.98／30匹で1.68／40匹で3.08・<code>?wearfree=</code><code>?wear=</code>）。<br>
+  実測：<b>15匹で5秒待っても1匹も減らない</b>（むしろ拾って18匹に増えた）／<b>30匹で5秒待つと4匹抜けて26匹</b>。
+  18匹あれば<b>半径170px＝画面の半分</b>の輪が作れるので、狙って溜める遊びはそのまま残ります。
+  <b>20匹台は粘れて、40匹は保てない</b>形です。<b>HUDの「鎖」が琥珀色になったら、そこから先は抜けていく合図</b>。<br>
   <b>■ 鎖が溜まる一方だった件の本命（v114）</b>──オーラの燃焼を上げても<b>まだ溜まりました</b>。
   当然で、<b>燃焼は疾走している間しか効かない</b>のに、拾うのは常にできるからです（磁石で吸い付くので実質無料）。
   そこで<b>繋いでいる間ずっと効く「酸切れ」</b>を入れました：<b>繋ぎ続けた尻尾の菌は酸を出し切って離れていきます</b>
@@ -242,7 +249,7 @@
 
 <h2>■ 却下：固める</h2>
 
-<a class="card dim" href="feel-curd.html?v=114">
+<a class="card dim" href="feel-curd.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">固める ─ 牛乳がぷるんとヨーグルトになる</div>
   <div class="desc"><b>今までのＸは全部「守る＝減らす・維持する」だった</b>ので、原理的に快感も達成感も出ませんでした。ＺもＹも「自分の操作で<b>何かが生まれる・変わる</b>」だから成立していた。<br>
@@ -254,7 +261,7 @@
 
 <h2>■ 塗る（ひとつ前）</h2>
 
-<a class="card dim" href="feel-acid.html?v=114">
+<a class="card dim" href="feel-acid.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">酸で塗る ─ 通った所がその場で酸性になる</div>
   <div class="desc">Ｚ「擦る＝変える」／Ｙ「ちぎる＝増やす」／Ｘ<b>「塗る＝守る」</b>。<br>
@@ -266,7 +273,7 @@
 
 <h2>■ 却下：分裂編</h2>
 
-<a class="card dim" href="feel-divide.html?v=114">
+<a class="card dim" href="feel-divide.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">分裂編 ─ 温めて、切って、伸ばす</div>
   <div class="desc"><b style="color:#e8c4c4">却下（2026-07-28）：待たされる／お使い感・緊張がない・伸ばす意味がない・コンセプトごと違う、の全部に該当。</b>切る許可をゲーム側が出すまで何もできない＝また「動詞が準備」になっていた。<br>
@@ -280,7 +287,7 @@
 
 <h2>■ つなぐこと自体を報酬にする</h2>
 
-<a class="card" href="feel-sweep.html?v=114">
+<a class="card" href="feel-sweep.html?v=115">
   <span class="tag t-old">ひとつ前</span>
   <div class="name">つないで薙ぎ払う</div>
   <div class="desc">前2作は<b>擦った所がその場で糖になる／ちぎった瞬間に増える</b>＝1動作＝1ご褒美でした。囲む方式は「集める→回り込む→閉じる」の3段階を踏まないと報酬が出ず、<b>動詞が"準備"</b>になっていました。<br>
@@ -289,7 +296,7 @@
 
 <h2>■ 囲む版の設計メモ（同じファイル）</h2>
 
-<a class="card dim" href="feel-classic.html?v=114">
+<a class="card dim" href="feel-classic.html?v=115">
   <span class="tag t-old">解説</span>
   <div class="name">ズタッと囲う（これまでの経緯）</div>
   <div class="desc">味方は<b>桿菌（乳酸桿菌）</b>、敵は<b>球菌の房（ブドウ球菌）</b>。乳酸菌が実際に抑える食中毒菌で、形が全く違うので一目で区別できます。なぞって乳酸菌を繋ぎ、<b>輪で囲めば内側は全部その場で溶ける</b>。<b>腐敗菌に触れれば鎖は弾け飛ぶ</b>（全部バラバラにはならず、<b>1〜4個の塊のまま</b>ちぎれて飛び散ります）。分かりやすさの核はこの2つだけで、容量制・消耗・軌跡の蒸発など<b>その場で結果が出ない仕組みは全て外しました</b>。<br>
@@ -303,19 +310,19 @@
 
 <h2>■ 試したが的を外した案</h2>
 
-<a class="card dim" href="feel-contain.html?v=114">
+<a class="card dim" href="feel-contain.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">囲って増殖を抑える</div>
   <div class="desc">乳酸＝静菌という正確な生物学で作った版。衝突は消えたが、その場で結果が出ないため意味が分かりづらく面白くなかった。</div>
 </a>
 
-<a class="card dim" href="feel-wall.html?v=114">
+<a class="card dim" href="feel-wall.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">酸の壁を築く</div>
   <div class="desc">腐敗を面にして壁でせき止める版。</div>
 </a>
 
-<a class="card dim" href="feel-turf.html?v=114">
+<a class="card dim" href="feel-turf.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">陣取り</div>
   <div class="desc">マス目で場所を取り合う版。</div>
@@ -323,25 +330,25 @@
 
 <h2>■ 過去の実験（比較用）</h2>
 
-<a class="card dim" href="feel-chain.html?v=114">
+<a class="card dim" href="feel-chain.html?v=115">
   <span class="tag t-old">核だけ</span>
   <div class="name">磁石で吸い付く核だけ</div>
   <div class="desc">敵もルールも無し。気持ち良いと確認済みの手触りそのもの（こちらは桿菌のまま）。</div>
 </a>
 
-<a class="card dim" href="feel-tap.html?v=114">
+<a class="card dim" href="feel-tap.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">タップで繋ぐ</div>
   <div class="desc">なぞりを捨てて桿菌を順にタップする案。手触りが素っ気ない。</div>
 </a>
 
-<a class="card dim" href="feel-splice.html?v=114">
+<a class="card dim" href="feel-splice.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">継ぎ足しで繋ぐ</div>
   <div class="desc">指を離しても鎖が残る案。まだ手が邪魔だった。</div>
 </a>
 
-<a class="card dim" href="feel-seal.html?v=114">
+<a class="card dim" href="feel-seal.html?v=115">
   <span class="tag t-no">却下</span>
   <div class="name">ひと続きでなぞって囲む</div>
   <div class="desc">点の敵を避けながら囲む方式。狭い画面で避けられずストレスの原因になった版。</div>
@@ -352,6 +359,6 @@
   衝突を無くす／静菌にする／経済を作る、といった"正しい"改良は全て遅延型で、
   「今の操作が正しかったのか」が分からなくなり面白さを失った。
 </div>
-<div id="ver">v114 (07-30 17:18)</div>
+<div id="ver">v115 (07-30 17:38)</div>
 </body>
 </html>

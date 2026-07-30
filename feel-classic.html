@@ -53,6 +53,8 @@
      減った瞬間だけ青く弾ける＝オーラで燃えているのが手元を見なくても分かる */
   #nums .s4 b{color:#a6ffd4}
   #nums .s4.burn b{color:#d8f4ff;text-shadow:0 0 8px rgba(120,225,255,.95)}
+  /* 保てる数を超えている＝ここから先は尻尾から抜けていく */
+  #nums .s4.over b{color:#ffd08a;text-shadow:0 0 7px rgba(255,190,110,.8)}
   #nums .s4.burn{transform:scale(1.14)}
   #nums .s4{transition:transform .12s ease-out}
   /* 奪われた瞬間だけ「乳酸菌」を赤くする＝画面の外で減っても気付ける */
@@ -273,7 +275,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v114 (07-30 17:18)';
+const BUILD='v115 (07-30 17:38)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1504,7 +1506,12 @@ function spendChain(n){
 //   ★菌は死なない（盤面に残って回復する）＝ゲージは減らない。溜め込みだけを止める仕組みで、
 //     v105〜v106のような「攻撃が自傷になる」失敗を繰り返さないための形。
 //   離れる速さは鎖の長さに比例（長いほど後ろから抜けていく）
-const CHAIN_WEAR=+(_q.get('wear')||0.05);   // 鎖1匹あたり毎秒この数だけ離れる
+// ★v115：ただし「溜めてから大きく囲う」は残したい（ユーザー判断）。
+//   そこで【WEAR_FREE 匹までは減らない】猶予を置き、超えた分だけが抜けるようにした。
+//   ＝18匹までは自由に溜められる（半径170px＝画面の半分の輪が作れる）。
+//   それ以上は超過分に比例して抜けるので、20匹台は粘れるが40匹は保てない。
+const WEAR_FREE=+(_q.get('wearfree')||18);
+const CHAIN_WEAR=+(_q.get('wear')||0.14);   // 超過1匹あたり毎秒この数だけ離れる
 const WEAR_SPENT=+(_q.get('wearspent')||3.5);  // 離れた菌が酸を溜め直すまでの秒数
 let wearAcc=0, wearSeen=false;
 function dropTail(){
@@ -1521,7 +1528,7 @@ function dropTail(){
   const rest=rods.filter(x=>x.joined).sort((a,b)=>a.order-b.order);
   orderSeq=0; for(const x of rest) x.order=orderSeq++;
   if(!wearSeen){ wearSeen=true;
-    tipMsg('繋ぎ続けた菌は酸を出し切って離れる ─ 溜め込めないので使い切る'); }
+    tipMsg('鎖は'+WEAR_FREE+'匹までしか保てない ─ それ以上は尻尾から酸切れで離れる'); }
 }
 // 砕ける破片（丸い粒ではなく、割れた棒切れに見せる）
 function shatterBits(x,y,ang){
@@ -1558,7 +1565,11 @@ function updateHud(){
 let _chainShown=-1, _chainBurnT=-9;
 function updateChain(burn){
   const n=joinedCount;
-  if(n!==_chainShown){ _chainShown=n; elChain.textContent=n; }
+  if(n!==_chainShown){
+    _chainShown=n; elChain.textContent=n;
+    // 保てる数を超えたら琥珀色＝「ここから先は抜けていく」
+    elChainBox.classList.toggle('over', n>WEAR_FREE);
+  }
   if(burn){ _chainBurnT=clock; elChainBox.classList.add('burn'); }
   else if(elChainBox.classList.contains('burn') && clock-_chainBurnT>0.18)
     elChainBox.classList.remove('burn');
@@ -2422,9 +2433,10 @@ function loop(ts){
       }
     } else auraAcc=0;
     // ★酸切れ（纏っていなくても常に効く）。溜め込めないが、菌は死なないのでゲージは減らない
-    if(CHAIN_WEAR>0 && joinedCount>0){
-      wearAcc += CHAIN_WEAR*joinedCount*dt;
-      while(wearAcc>=1 && joinedCount>0){ wearAcc-=1; dropTail(); updateChain(false); }
+    const over=Math.max(0, joinedCount-WEAR_FREE);
+    if(CHAIN_WEAR>0 && over>0){
+      wearAcc += CHAIN_WEAR*over*dt;
+      while(wearAcc>=1 && joinedCount>WEAR_FREE){ wearAcc-=1; dropTail(); updateChain(false); }
     } else wearAcc=0;
     if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0;
       if(AURA_IGNITE>0 && joinedCount>0 && clock-igniteT>IGNITE_CD){
