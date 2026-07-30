@@ -256,7 +256,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v104 (07-30 11:42)';
+const BUILD='v105 (07-30 11:52)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -451,6 +451,8 @@ const PARK_TOUCH=+(_q.get('parkt')||1.40);
 const PARK_FADE=+(_q.get('parkf')||0.60);
 const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めている」
 let parkT=0, camW=1, isMouse=false;
+const AURA_BURN=+(_q.get('burn')||1.1);   // オーラ中に毎秒失う桿菌の数
+let auraAcc=0;
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
 let comboSeen=false;
@@ -773,6 +775,19 @@ const AM_CUT0=+(_q.get('cut0')||9);     // 1回の封印で削れる半径（基
 const AM_CUT1=+(_q.get('cut1')||0.55);  // 桿菌1匹あたり追加で削れる量
 // ★封印1回につき鎖を1匹使う（何匹溶かしても1匹）。コストは軽いまま
 //   「まとめて大きく囲うほど得」が効き、鎖の長さ＝封印できる回数になる
+// ★囲んだ面積あたりの代金。半径45pxの小さな輪なら1匹、150pxの大きな輪なら10匹。
+//   面積は靴ひも公式で出す（多角形なのでそのまま計算できる）
+const AREA_PER=+(_q.get('area')||7000);   // 桿菌1匹で塗れる面積(px^2)
+function polyArea(poly){
+  let a=0;
+  for(let i=0,n=poly.length;i<n;i++){ const p1=poly[i], p2=poly[(i+1)%n];
+    a += p1.x*p2.y - p2.x*p1.y; }
+  return Math.abs(a)/2;
+}
+function sealCost(poly){
+  const n=Math.round(polyArea(poly)/AREA_PER);
+  return Math.max(SEAL_COST, Math.min(joinedCount, n));
+}
 const SEAL_COST=+(_q.get('seal')||1);
 const SPENT_T=+(_q.get('spent')||0.8);  // 離脱後に拾えない秒数
 // ★酸の帯（なぞりの軌跡）の寿命。尾から蒸発するので、大きく囲うには素早く回る必要がある。
@@ -827,8 +842,9 @@ const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
 //   囲まなくてもゲージが上がっていった）。増殖の差を詰めて、腕前の分だけ動くようにする。
 //   実機で詰められるよう ?diff=easy|normal|hard を用意した（覚えるのが2つだと面倒なので）
 const DIFF=(function(){ const v=(_q.get('diff')||'').toLowerCase();
-  return (v==='easy'||v==='normal'||v==='hard')? v : 'normal'; })();
-const _D={easy:{gf:0.016, ga:0.050}, normal:{gf:0.020, ga:0.044}, hard:{gf:0.024, ga:0.038}}[DIFF];
+  return (v==='easy'||v==='normal'||v==='hard'||v==='ultra')? v : 'normal'; })();
+const _D={easy:{gf:0.020, ga:0.046}, normal:{gf:0.026, ga:0.038},
+          hard:{gf:0.032, ga:0.032}, ultra:{gf:0.040, ga:0.028}}[DIFF]||{gf:0.026,ga:0.038};
 const GF=+(_q.get('gf')||_D.gf);   // 腐敗菌1匹あたりの分裂速度（/秒）
 const GA=+(_q.get('ga')||_D.ga);   // 乳酸菌1匹あたりの分裂速度（/秒）
 const STEAL_N=+(_q.get('steal')||1);   // 腐敗菌1回の分裂で奪う乳酸菌の数
@@ -1214,15 +1230,14 @@ function doSeal(poly){
     fizz(0, joinedCount);
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
   }
-  // ★コンボ：続けて溶かせたら鎖を使わない（8の字で2つ続けて囲む、が報われる）
-  let free=false;
+  // ★コンボ：演出だけ（弾薬の免除は廃止。無料が挟まると弾薬が減らず一方的になる）
   if(sealed>0){
     combo = (clock-comboT<=COMBO_T)? combo+1 : 1;
     comboT=clock;
-    // ★毎回無料だと弾薬が減らず一方的になったので、コンボ中は「1回おきに無料」＝実質半額にする
-    free = COMBO_FREE && combo>=2 && (combo%2===0);
   }
-  if((sealed>0||shrunk>0) && !free) spendChain(SEAL_COST);   // 溶かしても靄を削っても1回1匹
+  // ★★代金は「囲んだ面積」に比例する。小さく囲えば1匹、大きく囲えば数匹。
+  //   繋いだ数＝一度に払える面積になり、拾った分がそのまま攻撃力の上限になる＝弾薬が余らない
+  if(sealed>0||shrunk>0) spendChain(sealCost(poly));
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
@@ -1235,10 +1250,10 @@ function doSeal(poly){
       // 輪の中心にコンボを出す
       let cx=0, cy=0; for(const q of poly){ cx+=q.x; cy+=q.y; }
       cx/=poly.length; cy/=poly.length;
-      pops.push({x:cx, y:cy, n:combo, life:1, free:free});
+      pops.push({x:cx, y:cy, n:combo, life:1, free:false});
       comboSnd(combo);
       if(!comboSeen){ comboSeen=true;
-        tipMsg('コンボ！ 続けて囲むと鎖を使わない ─ 8の字で二つまとめて'); }
+        tipMsg('コンボ！ 続けて決めるほど気持ちいい ─ 8の字で二つまとめて'); }
     }
     else if(sealed>=3) tipMsg(sealed+'匹まとめて溶かした！');
   }else{
@@ -2058,6 +2073,12 @@ function loop(ts){
     if(AURA_FLOW>0 && Math.hypot(camVel.x,camVel.y)>AURA_FLOW) want=Math.max(want, gate*start0);
     const wasArmed=aura>0.35;
     aura += (want-aura)*Math.min(1,dt*(want>aura?22:5));   // 点くのは素早く、消えるのは緩やか
+    // ★オーラは酸を撒き散らしている状態なので、纏っている間は毎秒 桿菌を消費する。
+    //   薙ぎ払いも無料ではなくなる＝拾った分をどこに使うかの選択が生まれる
+    if(aura>0.35 && joinedCount>0){
+      auraAcc += AURA_BURN*dt;
+      while(auraAcc>=1 && joinedCount>0){ auraAcc-=1; spendChain(1); }
+    } else auraAcc=0;
     if(!wasArmed && aura>0.35){ auraOnSnd(); auraFlash=1; auraTail=0; }
     else if(wasArmed && aura<=0.35){ auraOffSnd(); auraTail=AURA_TAIL; }   // ここから余韻
     // 余韻の間は攻撃力は無いが、触れても飛び散らない（＝減速して囲みに入れる）
