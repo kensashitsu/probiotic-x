@@ -273,7 +273,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v113 (07-30 16:58)';
+const BUILD='v114 (07-30 17:18)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -978,7 +978,7 @@ function scatter(){
   // ★盤面は画面より広いので、原点(0,0)のままだと必ず左上から始まってしまう。
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -1498,6 +1498,30 @@ function spendChain(n){
   burnFx=0;
   const rest=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
   orderSeq=0; for(const r of rest) r.order=orderSeq++;
+}
+// ★v114：鎖が溜まる一方だった件。オーラの燃焼だけでは足りない（疾走しない限り減らない）ので、
+//   繋いでいる間ずっと効く「酸切れ」を入れる：長く繋いだ尻尾の菌は酸を出し切って離れていく。
+//   ★菌は死なない（盤面に残って回復する）＝ゲージは減らない。溜め込みだけを止める仕組みで、
+//     v105〜v106のような「攻撃が自傷になる」失敗を繰り返さないための形。
+//   離れる速さは鎖の長さに比例（長いほど後ろから抜けていく）
+const CHAIN_WEAR=+(_q.get('wear')||0.05);   // 鎖1匹あたり毎秒この数だけ離れる
+const WEAR_SPENT=+(_q.get('wearspent')||3.5);  // 離れた菌が酸を溜め直すまでの秒数
+let wearAcc=0, wearSeen=false;
+function dropTail(){
+  const line=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
+  const r=line[0];                            // 尻尾から
+  if(!r) return;
+  r.joined=false; r.spent=WEAR_SPENT; r.order=0;
+  if(r.link&&r.link.next===r) r.link.next=null;
+  if(r.next) r.next.link=null;
+  r.link=null; r.next=null;
+  joinedCount--;
+  // 「酸を出し切って離れた」ことが分かる小さな合図（砕けたのではないので白い破片は出さない）
+  for(let i=0;i<5;i++) bits.push({x:r.x,y:r.y, vx:rnd(-.8,.8), vy:rnd(-1.0,.2), life:.6, r:rnd(.9,1.8)});
+  const rest=rods.filter(x=>x.joined).sort((a,b)=>a.order-b.order);
+  orderSeq=0; for(const x of rest) x.order=orderSeq++;
+  if(!wearSeen){ wearSeen=true;
+    tipMsg('繋ぎ続けた菌は酸を出し切って離れる ─ 溜め込めないので使い切る'); }
 }
 // 砕ける破片（丸い粒ではなく、割れた棒切れに見せる）
 function shatterBits(x,y,ang){
@@ -2397,6 +2421,11 @@ function loop(ts){
         spendChain(1);
       }
     } else auraAcc=0;
+    // ★酸切れ（纏っていなくても常に効く）。溜め込めないが、菌は死なないのでゲージは減らない
+    if(CHAIN_WEAR>0 && joinedCount>0){
+      wearAcc += CHAIN_WEAR*joinedCount*dt;
+      while(wearAcc>=1 && joinedCount>0){ wearAcc-=1; dropTail(); updateChain(false); }
+    } else wearAcc=0;
     if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0;
       if(AURA_IGNITE>0 && joinedCount>0 && clock-igniteT>IGNITE_CD){
         igniteT=clock; burnFx=1; spendChain(AURA_IGNITE); }                      // 点火代
