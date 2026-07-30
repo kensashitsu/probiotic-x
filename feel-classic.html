@@ -275,7 +275,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v116 (07-31 06:30)';
+const BUILD='v117 (07-31 07:02)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -487,6 +487,9 @@ const IGNITE_CD=+(_q.get('ignitecd')||1.2);
 let igniteT=-9;
 let auraAcc=0;
 let burnFx=0;        // 今の消費がオーラ由来か（表示の色分け用）
+// ★中和の音は、同時に鳴る「鎖が砕ける音」「弾かれた音」に埋もれて聞こえなかった。
+//   中和した回は他を黙らせて、その音だけを立てる
+let crackMute=false;
 let burnSeen=false;  // 燃焼の説明を出したか
 let ammoFlash=0;     // 弾薬が減った合図（指先のバッジを光らせる）
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
@@ -826,8 +829,12 @@ function polyArea(poly){
     a += p1.x*p2.y - p2.x*p1.y; }
   return Math.abs(a)/2;
 }
-function sealCost(poly){
-  const n=Math.round(polyArea(poly)/AREA_PER);
+// ★溶かした匹数ぶんの代金（v117）。面積だけを代金にしていると、
+//   密度を上げた瞬間に「同じ輪でより多く獲れる＝値段据え置きで報酬だけ1.4倍」になり、
+//   簡単に完封できてしまった。匹数ぶんも取れば、密度を変えても収支は動かない
+const PER_FOE=+(_q.get('perfoe')||0.35);   // 腐敗菌1匹あたりの追加の代金
+function sealCost(poly, sealed){
+  const n=Math.round(polyArea(poly)/AREA_PER + (sealed||0)*PER_FOE);
   return Math.max(SEAL_COST, Math.min(joinedCount, n));
 }
 const SEAL_COST=+(_q.get('seal')||1);
@@ -1087,7 +1094,9 @@ function killAllyNear(x,y,R){
 //   これが無いと、戦うほど自分の数が減る＝弾薬を使った分だけゲージが下がるので、
 //   放置よりも戦った方が負ける、という逆立ちした収支になっていた（実機で判明）。
 //   実際の発酵でも、死んだ菌体は分解されて他の菌の栄養になる
-const REFUND=+(_q.get('refund')||0.6);   // 腐敗菌1匹あたり何匹の乳酸菌が湧くか
+// ★回収も「溶かした匹数」に比例するので、密度を上げた分だけ増えていた。
+//   代金（PER_FOE）と合わせて、1匹あたりの収支が密度に依存しないところまで下げる（0.6→0.45）
+const REFUND=+(_q.get('refund')||0.45);   // 腐敗菌1匹あたり何匹の乳酸菌が湧くか
 // ★「湧いた菌は9秒 酸を出せない」も試したが、ルールが増えるだけなので廃止（v112）。
 //   弾薬の量は自然増殖（?ga=）だけで調整する＝覚えることを増やさない
 let refAcc=0, refundSeen=false;
@@ -1427,7 +1436,12 @@ function doSeal(poly){
   }
   // ★★代金は「囲んだ面積」に比例する。小さく囲えば1匹、大きく囲えば数匹。
   //   繋いだ数＝一度に払える面積になり、拾った分がそのまま攻撃力の上限になる＝弾薬が余らない
-  if(sealed>0||shrunk>0) spendChain(sealCost(poly));
+  // ★★代金は「囲んだ面積」＋「溶かした匹数」。面積だけだと、密度を上げた瞬間に
+  //   同じ輪でより多くの敵が獲れて【値段は据え置きのまま報酬だけ1.4倍】になる（v116で完封できた原因）。
+  //   匹数ぶんも取れば、密度をいくら変えても収支が動かない
+  if(shrunk>0 && sealed===0) crackMute=true;    // 中和の音を立たせる
+  if(sealed>0||shrunk>0) spendChain(sealCost(poly, sealed));
+  crackMute=false;
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
@@ -1457,7 +1471,8 @@ function doSeal(poly){
   }else{
     fizz(0, joinedCount);
   }
-  if(resisted>0){ if(hazed.length) guardSnd(); else resistSnd(resisted); }
+  // 中和した回は guardSnd を鳴らさない（中和の音とぶつかって、どちらも聞こえない）
+  if(resisted>0 && shrunk===0){ if(hazed.length) guardSnd(); else resistSnd(resisted); }
 }
 let lastPc=-1;
 function updateBar(){
@@ -1516,7 +1531,7 @@ function spendChain(n){
     shatterBits(r.x,r.y,r.ang);
     joinedCount--;
   }
-  if(cost>0){ crackSnd(); ammoFlash=1; }
+  if(cost>0){ if(!crackMute) crackSnd(); ammoFlash=1; }
   // ★燃えた分は尻尾で消える＝画面外になりがちなので、指の斜め上にも青い「−1」を出す
   //   （指の真下は指で隠れて見えない）。あわせてHUDの「鎖」を青く弾かせる
   if(cost>0 && burnFx && dragging)
@@ -2050,27 +2065,40 @@ function foeDivSnd(){ if(!A||!sndOK('fdiv'))return; try{
 // ★アンモニアを中和した音。「効いている」ことが一番伝わるべき瞬間なので、
 //   泡が潰れるシューッ（高い方から低い方へ落ちる帯域ノイズ）＋酸が勝つ和音を重ねる。
 //   溶かした時の fizz とは向き（周波数の動き）を逆にして、耳でも別物にする
+// ノイズの掃引は「よく分からない音」になった（実機）。輪郭のある音＝
+// ①泡が1つずつ潰れるポコポコ（下がっていく短い音）②飲み込むようなグルッ（急降下）
+// ③酸が押し返す2音（上がる）の3層にして、何が起きたか耳で追えるようにする
 function neutralSnd(n,strong){ if(!A||!sndOK('neu'))return; try{
-  const t=A.currentTime, dur=0.42+Math.min(n,4)*0.04;
-  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate);
-  const ch=buf.getChannelData(0);
-  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e; }
-  const src=A.createBufferSource(); src.buffer=buf;
-  const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=1.6;
-  bp.frequency.setValueAtTime(2600,t); bp.frequency.exponentialRampToValueAtTime(420,t+dur);
-  const gg=A.createGain();
-  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.26,t+0.03);
-  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-  src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
-  // 酸が押し返す2音（上がる＝pHが下がった＝こちらの勝ち）
-  const base=430+Math.min(strong,30)*8;
+  const t=A.currentTime;
+  // ① 泡が潰れる（4粒・下がりながら）
+  for(let i=0;i<4;i++){
+    const o=A.createOscillator(), og=A.createGain();
+    const t0=t+i*0.055;
+    o.type='sine';
+    o.frequency.setValueAtTime(760-i*130, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(90,300-i*55), t0+0.07);
+    og.gain.setValueAtTime(0.0001,t0);
+    og.gain.exponentialRampToValueAtTime(0.16,t0+0.008);
+    og.gain.exponentialRampToValueAtTime(0.0001,t0+0.09);
+    o.connect(og).connect(A.destination); o.start(t0); o.stop(t0+0.11);
+  }
+  // ② 靄が縮んで飲み込まれる（急降下）
+  const o2=A.createOscillator(), g2=A.createGain();
+  o2.type='triangle';
+  o2.frequency.setValueAtTime(520,t); o2.frequency.exponentialRampToValueAtTime(120,t+0.3);
+  g2.gain.setValueAtTime(0.0001,t); g2.gain.exponentialRampToValueAtTime(0.13,t+0.03);
+  g2.gain.exponentialRampToValueAtTime(0.0001,t+0.32);
+  o2.connect(g2).connect(A.destination); o2.start(t); o2.stop(t+0.34);
+  // ③ 酸が押し返す2音（上がる＝pHが下がった＝こちらの勝ち）
+  const base=470+Math.min(strong,30)*8;
   [0,7].forEach((iv,k)=>{
     const o=A.createOscillator(), og=A.createGain();
     o.type='triangle'; o.frequency.value=base*Math.pow(2,iv/12);
-    og.gain.setValueAtTime(0.0001,t+k*0.07);
-    og.gain.exponentialRampToValueAtTime(0.11,t+0.03+k*0.07);
-    og.gain.exponentialRampToValueAtTime(0.0001,t+0.34+k*0.07);
-    o.connect(og).connect(A.destination); o.start(t+k*0.07); o.stop(t+0.38+k*0.07);
+    const t0=t+0.16+k*0.075;
+    og.gain.setValueAtTime(0.0001,t0);
+    og.gain.exponentialRampToValueAtTime(0.14,t0+0.02);
+    og.gain.exponentialRampToValueAtTime(0.0001,t0+0.30);
+    o.connect(og).connect(A.destination); o.start(t0); o.stop(t0+0.34);
   });
 }catch(e){} }
 // 靄を削り切って晴れた瞬間＝一番大きな成果なので、上がる3音で締める
