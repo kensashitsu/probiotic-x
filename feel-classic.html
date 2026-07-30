@@ -256,7 +256,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v103 (07-30 11:01)';
+const BUILD='v104 (07-30 11:42)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -823,8 +823,14 @@ const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
 //     （上手いプレイで17→56匹/画面、放置だと敵が17→40匹/画面に増えて腐っていく）。
 //   モデルは「食品という限られた場所の取り合い」＝ロジスティック競争。
 //   合計が容量に近づくと両方とも増えにくくなる（実際の発酵と同じ基質の奪い合い）
-const GF=+(_q.get('gf')||0.016);   // 腐敗菌1匹あたりの分裂速度（/秒）
-const GA=+(_q.get('ga')||0.055);   // 乳酸菌1匹あたりの分裂速度（/秒）
+// ★毎回完封できてしまう問題（実測：90秒で味方100→310／敵100→175＝味方の増殖が3.4倍速く、
+//   囲まなくてもゲージが上がっていった）。増殖の差を詰めて、腕前の分だけ動くようにする。
+//   実機で詰められるよう ?diff=easy|normal|hard を用意した（覚えるのが2つだと面倒なので）
+const DIFF=(function(){ const v=(_q.get('diff')||'').toLowerCase();
+  return (v==='easy'||v==='normal'||v==='hard')? v : 'normal'; })();
+const _D={easy:{gf:0.016, ga:0.050}, normal:{gf:0.020, ga:0.044}, hard:{gf:0.024, ga:0.038}}[DIFF];
+const GF=+(_q.get('gf')||_D.gf);   // 腐敗菌1匹あたりの分裂速度（/秒）
+const GA=+(_q.get('ga')||_D.ga);   // 乳酸菌1匹あたりの分裂速度（/秒）
 const STEAL_N=+(_q.get('steal')||1);   // 腐敗菌1回の分裂で奪う乳酸菌の数
 const STEAL_R=150;
 // ★桿菌の太さは5.3pxしかないので、くびれの"形"は物理的に見えない。
@@ -895,7 +901,9 @@ function scatter(){
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   makeStartChains();          // ★最初から連なっているものを混ぜる
   bits=[]; seals=[]; shards=[]; pops=[]; combo=0; comboT=-9; totalSealed=0; hitCd=0; shake=0;
-  cam={x:0,y:0}; lead={x:0,y:0}; clampCam();
+  // ★盤面は画面より広いので、原点(0,0)のままだと必ず左上から始まってしまう。
+  //   中央から始める＝どちらへ走っても同じだけ余裕がある
+  cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
@@ -1211,7 +1219,8 @@ function doSeal(poly){
   if(sealed>0){
     combo = (clock-comboT<=COMBO_T)? combo+1 : 1;
     comboT=clock;
-    free = COMBO_FREE && combo>=2;
+    // ★毎回無料だと弾薬が減らず一方的になったので、コンボ中は「1回おきに無料」＝実質半額にする
+    free = COMBO_FREE && combo>=2 && (combo%2===0);
   }
   if((sealed>0||shrunk>0) && !free) spendChain(SEAL_COST);   // 溶かしても靄を削っても1回1匹
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
