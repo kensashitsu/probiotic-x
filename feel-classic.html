@@ -5,10 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ぬか床を守れ">
+<meta name="apple-mobile-web-app-title" content="プロバイオティＸ">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <meta name="theme-color" content="#0b0f14">
 <link rel="manifest" href="manifest.json">
-<title>ズタッと囲う（原点版）</title>
+<title>プロバイオティＸ ─ ぬか床を守れ</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
@@ -65,11 +67,42 @@
     align-items:center;justify-content:center;text-align:center;padding:0 26px;
     background:radial-gradient(circle at 50% 42%,rgba(12,26,24,.92),rgba(8,12,16,.97))}
   #ready.hide{display:none}
-  #ready .rt{font-size:30px;font-weight:800;color:#8ff0c0;letter-spacing:.06em}
-  #ready .rs{font-size:13.5px;color:#9fb3ac;margin-top:14px;line-height:2}
+  /* マスコット。前2作と同じ「顔つきの主役を上に置く」構図 */
+  #ready .mascot{width:150px;max-width:44vw}
+  #ready .mascot svg{width:100%;height:auto;display:block;
+    filter:drop-shadow(0 6px 18px rgba(0,0,0,.55)) drop-shadow(0 0 14px rgba(140,240,200,.25));
+    animation:mfloat 3.6s ease-in-out infinite}
+  @keyframes mfloat{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-6px) rotate(-2deg)}}
+  #ready .rt{font-size:30px;font-weight:800;color:#eafff6;letter-spacing:.04em;margin-top:14px;
+    text-shadow:0 2px 12px rgba(0,0,0,.6)}
+  #ready .rt .x{color:#8ff0c0}
+  #ready .rsub{margin-top:6px;font-size:13px;font-weight:800;letter-spacing:.22em;color:#8ff0c0;
+    opacity:.95}
+  #ready .rs{font-size:13.5px;color:#9fb3ac;margin-top:16px;line-height:1.95}
   #ready .rs b{color:#dff7ec}
-  #go{margin-top:26px;font:inherit;font-size:16px;font-weight:800;color:#0b0f14;background:#8ff0c0;
-    border:0;border-radius:999px;padding:14px 34px}
+  #ready .rs b.hot{color:#8ff0c0}
+  #ready .btns{display:flex;gap:12px;margin-top:22px}
+  /* 前2作と同じ立体ボタン。主役＝はじめる／控え＝あそびかた */
+  #go,#howto{font:inherit;font-size:16px;font-weight:800;border-radius:999px;padding:13px 26px;
+    border:0;letter-spacing:.04em}
+  #go{color:#08281e;background:linear-gradient(180deg,#9dffd0,#5fd7a6);
+    box-shadow:0 5px 0 #2f9c78, 0 10px 22px rgba(0,0,0,.45)}
+  #go:active{transform:translateY(3px);box-shadow:0 2px 0 #2f9c78, 0 6px 14px rgba(0,0,0,.45)}
+  #howto{color:#8ff0c0;background:transparent;box-shadow:inset 0 0 0 2px rgba(143,240,192,.6)}
+  #howto:active{transform:translateY(2px)}
+  /* あそびかた */
+  #help{position:absolute;inset:0;z-index:14;display:none;align-items:center;justify-content:center;
+    padding:18px;background:rgba(5,10,13,.86)}
+  #help.show{display:flex}
+  #help .hbox{max-width:520px;width:100%;max-height:100%;overflow:auto;
+    background:rgba(10,20,24,.96);border:1px solid #26343c;border-radius:18px;padding:18px 16px 16px;
+    text-align:left}
+  #help .htl{font-size:17px;font-weight:800;color:#8ff0c0;text-align:center;letter-spacing:.08em}
+  #help .hrow{display:flex;gap:9px;margin-top:12px;font-size:12.5px;line-height:1.75;color:#9fb3ac}
+  #help .hrow b{color:#dff7ec}
+  #help .hi{color:#8ff0c0;font-weight:800;flex:none}
+  #helpClose{display:block;margin:16px auto 2px;font:inherit;font-size:14px;font-weight:800;
+    color:#08281e;background:#8ff0c0;border:0;border-radius:999px;padding:10px 26px}
   #ready .rn{font-size:11px;color:#5f6f77;margin-top:18px}
   #over .ttl{font-size:27px;font-weight:800;letter-spacing:.04em}
   #over .sub{font-size:13px;color:#9fb3ac;margin-top:10px;line-height:1.9}
@@ -107,7 +140,8 @@
       left:calc(env(safe-area-inset-left) + 14px);right:calc(env(safe-area-inset-right) + 14px)}
     #bar{height:20px} #bar .cap{font-size:10px}
     #tip{top:calc(env(safe-area-inset-top) + 54px);font-size:11.5px}
-    #ready .rt{font-size:26px} #ready .rs{font-size:12.5px;margin-top:9px;line-height:1.75}
+    #ready .rt{font-size:24px;margin-top:8px} #ready .rs{font-size:12px;margin-top:9px;line-height:1.7}
+    #ready .mascot{width:104px} #ready .rsub{font-size:11.5px;margin-top:4px} #ready .btns{margin-top:14px}
     #go{margin-top:15px;padding:11px 30px} #ready .rn{margin-top:10px}
     #over{top:14%;left:15%;right:15%;padding:18px}
   }
@@ -120,7 +154,9 @@
   body.short #nums .foodname{font-size:10.5px}
   body.short #reset{font-size:9.5px;padding:3px 8px}
   body.short #tip{top:calc(env(safe-area-inset-top) + 42px);font-size:10.5px}
-  body.short #ready .rt{font-size:22px}
+  body.short #ready .mascot{width:78px}
+  body.short #ready .rsub{font-size:10.5px}
+  body.short #ready .rt{font-size:21px;margin-top:6px}
   body.short #ready .rs{font-size:11.5px;margin-top:7px;line-height:1.65}
   body.short #go{margin-top:11px;font-size:15px;padding:9px 26px}
   body.short #ready .rn{margin-top:8px;font-size:10px}
@@ -158,13 +194,58 @@
 </div>
 <div id="tip">なぞって乳酸菌を繋ぐほど酸の帯が伸び、大きく囲める ─ 囲えば溶ける／触れれば弾ける</div>
 <div id="ready">
-  <div class="rt">ぬか床を守れ</div>
-  <div class="rs">なぞって<b>乳酸菌（白い桿菌）</b>を繋ぎ、<b>腐敗菌（ピンクの球菌）</b>を輪で囲んで溶かす。<br>
-  90秒後に<b>数の多い方が勝ち</b>。触れると鎖は弾け、速く走ると<b>酸のオーラ</b>を纏う。</div>
-  <button id="go">タップして開始</button>
-  <div class="rn">※ブラウザの仕様で、音は最初のタップから鳴り始めます。右上の <b>🔊</b> でオン/オフできます</div>
+  <!-- ★マスコット：乳酸桿菌。前2作（六角の酵素／酵母の細胞）と同じ「顔つきの主役」。
+       小さい子がくっついているのは、二分裂して連なるという芯を一目で見せるため。
+       文字を菌のモチーフで描くのは以前ダサくなったので、字は普通に組んで絵はここだけ -->
+  <div class="mascot" aria-hidden="true">
+    <svg viewBox="0 0 132 96">
+      <defs>
+        <linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#c8f4e2"/>
+        </linearGradient>
+        <linearGradient id="mg2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#f4fffb"/><stop offset="1" stop-color="#bdeed9"/>
+        </linearGradient>
+      </defs>
+      <g transform="rotate(-16 66 52)">
+        <!-- 子（分裂して連なった相手） -->
+        <rect x="14" y="40" width="34" height="24" rx="12" fill="url(#mg2)" stroke="#8ff0c0" stroke-width="2"/>
+        <!-- 親 -->
+        <rect x="42" y="26" width="74" height="38" rx="19" fill="url(#mg)" stroke="#8ff0c0" stroke-width="2.4"/>
+        <!-- 隔壁（分裂のしるし） -->
+        <line x1="46" y1="30" x2="46" y2="60" stroke="#9fdcc4" stroke-width="2" opacity=".55"/>
+        <circle cx="70" cy="42" r="3.6" fill="#2a4a41"/>
+        <circle cx="92" cy="42" r="3.6" fill="#2a4a41"/>
+        <path d="M74 51 q7 6 14 0" stroke="#2a4a41" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+        <ellipse cx="62" cy="51" rx="5" ry="3.2" fill="#ffb0c8" opacity=".65"/>
+        <ellipse cx="100" cy="51" rx="5" ry="3.2" fill="#ffb0c8" opacity=".65"/>
+      </g>
+    </svg>
+  </div>
+  <div class="rt">プロバイオティ<span class="x">Ｘ</span></div>
+  <div class="rsub">ぬか床を守れ</div>
+  <div class="rs"><b>乳酸菌</b>を なぞって繋ぎ、<br>
+  <b>腐敗菌</b>を <b class="hot">輪で囲んで溶かす</b>。<br>
+  90秒後に <b>数の多い方が勝ち</b>。</div>
+  <div class="btns">
+    <button id="go">はじめる</button>
+    <button id="howto">あそびかた</button>
+  </div>
+  <div class="rn">※音は最初のタップから鳴り始めます（右上の <b>🔊</b> でオン/オフ）</div>
   <div class="rn" id="a2hs">※<b style="color:#8ff0c0">共有 → ホーム画面に追加</b>してから起動すると、
     アドレスバーが消えて画面が広くなります</div>
+</div>
+<!-- あそびかた（体験版は次の課題。まずは読める形で用意する） -->
+<div id="help">
+  <div class="hbox">
+    <div class="htl">あそびかた</div>
+    <div class="hrow"><span class="hi">①</span><span><b>集める</b>　白い<b>乳酸桿菌</b>をなぞると数珠つなぎになる。繋いだ数だけ<b>酸の帯</b>が伸び、大きく囲める</span></div>
+    <div class="hrow"><span class="hi">②</span><span><b>囲む</b>　軌跡で輪を閉じると、中のピンクの<b>腐敗菌</b>が酸で溶ける。<b>1回の封印で桿菌1匹</b>を使う（砕けて戻らない）</span></div>
+    <div class="hrow"><span class="hi">③</span><span><b>薙ぐ</b>　速く走ると<b>酸のオーラ</b>を纏い、敵の連鎖を弾き飛ばす。纏っている間は<b>拾えない・囲えない</b></span></div>
+    <div class="hrow"><span class="hi">④</span><span><b>避ける</b>　止まっている時に腐敗菌へ触れると<b>鎖の半分がちぎれる</b>。アンモニアの<b>靄</b>の中では溶かせない（囲うたびに縮む）</span></div>
+    <div class="hrow"><span class="hi">⑤</span><span><b>連続で決める</b>　続けて溶かすと<b>コンボ</b>になり、2回目以降は桿菌を使わない。<b>8の字</b>で二つまとめて</span></div>
+    <button id="helpClose">とじる</button>
+  </div>
 </div>
 <div id="over"><div class="ttl" id="overTtl"></div><div class="sub" id="overSub"></div>
   <button id="again">もう一度</button></div>
@@ -175,7 +256,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v101 (07-30 10:53)';
+const BUILD='v103 (07-30 11:01)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1421,8 +1502,22 @@ function beginMatch(){
   document.getElementById('ready').classList.add('hide');
 }
 ['click','touchend'].forEach(ev=>{
-  document.getElementById('ready').addEventListener(ev,e=>{ e.preventDefault(); beginMatch(); },{passive:false});
+  document.getElementById('ready').addEventListener(ev,e=>{
+    // 「あそびかた」やその中身を押した時は始めない
+    if(e.target.closest && e.target.closest('#howto')) return;
+    e.preventDefault(); beginMatch(); },{passive:false});
 });
+// あそびかたの開閉（タイトルの2ボタン構成は前2作に合わせたもの）
+{
+  const hp=document.getElementById('help');
+  const open=(e)=>{ e.preventDefault(); e.stopPropagation(); ac(); hp.classList.add('show'); };
+  const close=(e)=>{ e.preventDefault(); e.stopPropagation(); hp.classList.remove('show'); };
+  ['click','touchend'].forEach(ev=>{
+    document.getElementById('howto').addEventListener(ev,open,{passive:false});
+    document.getElementById('helpClose').addEventListener(ev,close,{passive:false});
+    hp.addEventListener(ev,(e)=>{ if(e.target===hp) close(e); },{passive:false});
+  });
+}
 document.getElementById('reset').addEventListener('click',()=>{scatter();});
 // ★音のオン/オフ。押すと切り替わり、記憶される。
 //   オンにした時は1音鳴らして「今どっちか」を耳でも確認できるようにする

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<title>アイコン素材</title>
+<style>
+  /* ★ホーム画面アイコンの素材。これを Playwright で 180/512 に撮って png にする。
+     iOSは角を自分で丸めるので、ここでは角丸なし・透明なしのべた塗りにする。
+     名前は端末側に「プロバイオティＸ」と出るので、絵はマスコットと Ｘ だけで足りる */
+  *{margin:0;padding:0}
+  html,body{width:512px;height:512px;overflow:hidden}
+  #ic{position:relative;width:512px;height:512px;
+    background:radial-gradient(circle at 50% 38%, #17323a 0%, #0e1a20 62%, #080f13 100%);
+    font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif}
+  /* 酸の輪＝この作品の動詞「囲む」を背景で示す */
+  #ring{position:absolute;left:64px;top:64px;width:384px;height:384px;border-radius:50%;
+    border:14px solid rgba(143,240,192,.30);
+    box-shadow:0 0 60px rgba(143,240,192,.22), inset 0 0 50px rgba(143,240,192,.12)}
+  #ring2{position:absolute;left:104px;top:104px;width:304px;height:304px;border-radius:50%;
+    border:3px dashed rgba(143,240,192,.45)}
+  svg{position:absolute;left:78px;top:150px;width:356px;height:auto;
+    filter:drop-shadow(0 10px 22px rgba(0,0,0,.55))}
+  #x{position:absolute;right:34px;bottom:14px;font-size:150px;font-weight:800;color:#8ff0c0;
+    letter-spacing:-.02em;text-shadow:0 4px 18px rgba(0,0,0,.6)}
+</style></head>
+<body>
+<div id="ic">
+  <div id="ring"></div><div id="ring2"></div>
+  <svg viewBox="0 0 132 96">
+    <defs>
+      <linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#c8f4e2"/>
+      </linearGradient>
+      <linearGradient id="mg2" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f4fffb"/><stop offset="1" stop-color="#bdeed9"/>
+      </linearGradient>
+    </defs>
+    <g transform="rotate(-16 66 52)">
+      <rect x="14" y="40" width="34" height="24" rx="12" fill="url(#mg2)" stroke="#8ff0c0" stroke-width="2"/>
+      <rect x="42" y="26" width="74" height="38" rx="19" fill="url(#mg)" stroke="#8ff0c0" stroke-width="2.4"/>
+      <line x1="46" y1="30" x2="46" y2="60" stroke="#9fdcc4" stroke-width="2" opacity=".55"/>
+      <circle cx="70" cy="42" r="3.6" fill="#2a4a41"/>
+      <circle cx="92" cy="42" r="3.6" fill="#2a4a41"/>
+      <path d="M74 51 q7 6 14 0" stroke="#2a4a41" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+      <ellipse cx="62" cy="51" rx="5" ry="3.2" fill="#ffb0c8" opacity=".65"/>
+      <ellipse cx="100" cy="51" rx="5" ry="3.2" fill="#ffb0c8" opacity=".65"/>
+    </g>
+  </svg>
+  <div id="x">Ｘ</div>
+</div>
+</body></html>
