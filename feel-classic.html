@@ -20,16 +20,22 @@
   /* 下部は手が被って死角になるので、操作以外のUIは全て上に寄せる */
   #hud{position:absolute;top:calc(env(safe-area-inset-top) + 9px);left:11px;right:11px;
     pointer-events:none;z-index:5}
-  /* 押し合いゲージ：左＝乳酸（味方）／右＝腐敗（敵）。境界が押し合う */
+  /* 押し合いゲージ：左＝乳酸（味方）／右＝腐敗（敵）。境界が押し合う。
+     ★盤面はゲージの下まで続いているので、半透明にして下の菌が見えるようにする。
+       完全に透かすと数字が読めないので、色は薄く・文字には影を付ける */
   #bar{position:relative;height:24px;border-radius:12px;overflow:hidden;
-    background:linear-gradient(90deg,#4a2f2a,#7a4a38);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.10), 0 2px 10px rgba(0,0,0,.45)}
+    background:linear-gradient(90deg,rgba(74,47,42,.42),rgba(122,74,56,.42));
+    -webkit-backdrop-filter:blur(2px) saturate(.9);backdrop-filter:blur(2px) saturate(.9);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14), 0 2px 10px rgba(0,0,0,.35)}
   #barL{position:absolute;left:0;top:0;bottom:0;width:50%;
-    background:linear-gradient(90deg,#2f9c78,#8ff0c0)}
+    background:linear-gradient(90deg,rgba(47,156,120,.52),rgba(143,240,192,.58))}
   #barMid{position:absolute;top:-2px;bottom:-2px;left:50%;width:3px;margin-left:-1.5px;
     background:#fff;box-shadow:0 0 8px rgba(255,255,255,.85)}
   #bar .cap{position:absolute;top:0;bottom:0;display:flex;align-items:center;
     font-size:11px;font-weight:800;letter-spacing:.08em}
+  /* 透けた分だけ文字が負けるので、白い縁を薄く敷いて読めるようにする */
+  #bar .cl,#pcL{text-shadow:0 0 3px rgba(220,255,240,.75)}
+  #bar .cr,#pcR{text-shadow:0 1px 3px rgba(0,0,0,.75)}
   #bar .cl{left:9px;color:#08281e}
   /* 押し合っている境目のすぐ両脇に、今の割合を出す */
   #pcL,#pcR{position:absolute;top:0;bottom:0;display:flex;align-items:center;
@@ -256,7 +262,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v106 (07-30 12:07)';
+const BUILD='v107 (07-30 13:26)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -451,8 +457,13 @@ const PARK_TOUCH=+(_q.get('parkt')||1.40);
 const PARK_FADE=+(_q.get('parkf')||0.60);
 const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めている」
 let parkT=0, camW=1, isMouse=false;
-const AURA_BURN=+(_q.get('burn')||0.8);   // オーラ中に毎秒失う桿菌の数
+// ★オーラ中に毎秒失う桿菌の数。0.8では減っている実感が無く、
+//   薙ぎ払いが実質タダだったので上げる（1.8＝約0.55秒ごとに1匹）
+const AURA_BURN=+(_q.get('burn')||1.8);
 let auraAcc=0;
+let burnFx=0;        // 今の消費がオーラ由来か（表示の色分け用）
+let burnSeen=false;  // 燃焼の説明を出したか
+let ammoFlash=0;     // 弾薬が減った合図（指先のバッジを光らせる）
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
 let comboSeen=false;
@@ -684,7 +695,8 @@ function followCam(dt){
   if(dragging && (clock-strokeT0<0.13 || dirRef.ang==null)){
     prevFinger.x=finger.x; prevFinger.y=finger.y; return;
   }
-  if(!dragging){ aura=0; guardOn=false; headSpd=0; fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
+  if(!dragging){ if(aura>0) auraLoopStop();
+    aura=0; guardOn=false; headSpd=0; fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
     camVel.x=0; camVel.y=0;
     prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
   const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
@@ -878,6 +890,13 @@ function inAmmonia(x,y){
   for(const a of ammo){ if(a.t<a.life && Math.hypot(x-a.x,y-a.y)<a.r) return true; }
   return false;
 }
+// どの靄に守られているのか（ガードの演出をその靄に出すため）
+function ammoniaAt(x,y){
+  let best=null, bd=1e9;
+  for(const a of ammo){ if(a.t>=a.life) continue;
+    const d=Math.hypot(x-a.x,y-a.y); if(d<a.r && d<bd){ bd=d; best=a; } }
+  return best;
+}
 let gauge=0.5, phase='ready', playT=0, firstStart=true;
 let foeAcc=0, allyAcc=0;
 // ★ミニマップはタップで開閉できる。閉じている間は小さなつまみだけ残す
@@ -922,7 +941,7 @@ function scatter(){
   // ★盤面は画面より広いので、原点(0,0)のままだと必ず左上から始まってしまう。
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -981,7 +1000,9 @@ function makeStartChains(){
   }
 }
 // 腐敗に押しのけられた乳酸菌を1匹消す（掴んでいる桿菌は奪われない）
-let lunges=[];   // 腐敗菌が乳酸菌に襲いかかる線（見せるためだけ）
+let lunges=[];   // 腐敗菌が乳酸菌を奪う様子（見せるためだけ）
+// 攻撃の見せ方。enzyme＝酵素の粒を吹きかけて溶かし栄養を吸う（既定）／beam＝昔の線
+const ATK=(_q.get('atk')||'enzyme');
 function killAllyNear(x,y,R){
   let bi=-1, bd=R;
   for(let i=0;i<rods.length;i++){ const r=rods[i];
@@ -1227,7 +1248,16 @@ function doSeal(poly){
       vx:rnd(-1.2,1.2), vy:rnd(-1.6,0.3), life:.9, r:rnd(1.2,2.8)});
   }
   // 靄に守られている敵はまだ溶けない（靄を削り切ってから）
-  for(const f of hazed){ f.resist=1; resisted++; }
+  // ★「一度囲っただけでは溶けない」理由が見えていなかったので、
+  //   守った膜を敵ごとに出し、守った靄の側も光らせる＝原因と結果が同時に見える
+  for(const f of hazed){
+    f.resist=1; f.shield=1; resisted++;
+    const a=ammoniaAt(f.x,f.y); if(a) a.guard=1;
+    for(let i=0;i<6;i++) bits.push({x:f.x+rnd(-6,6), y:f.y+rnd(-6,6),
+      vx:rnd(-.7,.7), vy:rnd(-.9,.2), life:.7, r:rnd(1,2.2), nh:1});
+  }
+  if(hazed.length && inView(hazed[0].x,hazed[0].y,30))
+    bits.push({x:hazed[0].x, y:hazed[0].y-14, vx:0, vy:-0.45, life:1.35, r:1, txt:'中和', col:'nh3', sm:1});
   if(shrunk>0){
     fizz(0, joinedCount);
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
@@ -1261,7 +1291,7 @@ function doSeal(poly){
   }else{
     fizz(0, joinedCount);
   }
-  if(resisted>0) resistSnd(resisted);
+  if(resisted>0){ if(hazed.length) guardSnd(); else resistSnd(resisted); }
 }
 let lastPc=-1;
 function updateBar(){
@@ -1283,7 +1313,7 @@ function updateBar(){
 }
 function finishGame(win,how){
   phase= win? 'win':'lose';
-  dragging=false; activeId=null;
+  dragging=false; activeId=null; auraLoopStop();
   const pc=Math.round(gauge*100);
   elTime.textContent='0';
   if(win){
@@ -1320,7 +1350,12 @@ function spendChain(n){
     shatterBits(r.x,r.y,r.ang);
     joinedCount--;
   }
-  if(cost>0) crackSnd();
+  if(cost>0){ crackSnd(); ammoFlash=1; }
+  // ★燃えた分は尻尾で消える＝画面外になりがちなので、指先にも青い「−1」を出す。
+  //   走っているだけで弾薬が溶けている事は、指元で分からないと意味が無い
+  if(cost>0 && burnFx && dragging)
+    bits.push({x:head.x+16, y:head.y-22, vx:0.25, vy:-0.8, life:1.0, r:1, txt:'-1', col:'burn', sm:1});
+  burnFx=0;
   const rest=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
   orderSeq=0; for(const r of rest) r.order=orderSeq++;
 }
@@ -1334,7 +1369,21 @@ function shatterBits(x,y,ang){
       life:1.6, r:rnd(1.6,3.0), len:rnd(5,11)*SCALE, ang:a, spin:rnd(-0.6,0.6), white:1});
   }
   bits.push({x:x, y:y, life:1.2, r:1, flash:1});
-  bits.push({x:x, y:y-6, vx:0, vy:-0.55, life:1.5, r:1, txt:'-1'});
+  // ★オーラで燃えた分は青い「−1」にする。溶かして払った分（白）と区別が付き、
+  //   「走っているだけで弾薬が減っている」が読めるようになる
+  bits.push({x:x, y:y-6, vx:0, vy:-0.55, life:1.5, r:1, txt:'-1', col:burnFx?'burn':null});
+}
+// ★分裂の合図。「敵も味方もいつ増えたのか全く分からない」＝このゲームの勝敗そのものが
+//   見えていなかった。輪＋割れた向きの光条＋「＋1」で知らせる。
+//   ただし敵が200匹いると毎秒何度も起きるので、文字と音だけは間引く（輪は毎回出す）
+const _divTxtT={a:-9,f:-9};
+function divFx(x,y,ang,good){
+  shards.push({x,y,ang,life:1,good,div:1});
+  const key=good?'a':'f';
+  if(inView(x,y,24) && clock-_divTxtT[key]>0.20){
+    _divTxtT[key]=clock;
+    bits.push({x, y:y-9, vx:0, vy:-0.5, life:1.15, r:1, txt:'＋1', col:good?'mint':'foe', sm:1});
+  }
 }
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
 function updateHud(){
@@ -1551,6 +1600,7 @@ const elSnd=document.getElementById('sndbtn');
 ['click','touchend'].forEach(ev=>{
   elSnd.addEventListener(ev,e2=>{ e2.preventDefault(); e2.stopPropagation();
     muted=!muted;
+    if(muted) auraLoopStop();          // 鳴り続ける音は消音で必ず止める
     try{ localStorage.setItem('mute', muted?'1':'0'); }catch(e3){}
     updSndBtn();
     if(!muted){ ac(); setTimeout(()=>{ ac(); if(A&&A.state==='running') startChime(); },60); }
@@ -1664,7 +1714,7 @@ function startChime(){
 }
 // 鳴らしすぎ防止（実機で重くならないよう、音ごとに最短間隔を設ける）
 const SND_GAP={pop:60, fizz:110, crack:90, brk:150, burst:150, div:260, bump:260,
-               auraOn:200, auraOff:200, resist:200};
+               auraOn:200, auraOff:200, resist:200, fdiv:340, guard:220};
 const _lastKey={};
 function sndOK(key){
   if(muted) return false;
@@ -1777,6 +1827,33 @@ function divSnd(){ if(!A||!sndOK('div'))return;  try{
   gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
   o.connect(gg).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
 }catch(e){} }
+// 腐敗菌が増えた音。味方(divSnd)は高く澄んだ音なので、こちらは低く濁った音にして
+// 耳だけでどちらが増えたか分かるようにする。数が多いので間隔は長め
+function foeDivSnd(){ if(!A||!sndOK('fdiv'))return; try{
+  const t=A.currentTime, dur=0.10;
+  const o=A.createOscillator(), gg=A.createGain();
+  o.type='square'; o.frequency.setValueAtTime(300,t); o.frequency.exponentialRampToValueAtTime(170,t+dur);
+  const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=900;
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.020,t+0.008);
+  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(lp).connect(gg).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+}catch(e){} }
+// アンモニアに酸を弾かれた音＝「効かなかった」が耳でも分かるように、
+// 溶けた時のシュワッとは正反対の、詰まった打音にする
+function guardSnd(){ if(!A||!sndOK('guard'))return; try{
+  const t=A.currentTime, dur=0.20;
+  const o=A.createOscillator(), gg=A.createGain();
+  o.type='triangle'; o.frequency.setValueAtTime(430,t); o.frequency.exponentialRampToValueAtTime(240,t+0.07);
+  const lp=A.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1500;
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.075,t+0.008);
+  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(lp).connect(gg).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+  const o2=A.createOscillator(), g3=A.createGain();   // 膜に当たった硬い音
+  o2.type='square'; o2.frequency.setValueAtTime(1750,t); o2.frequency.exponentialRampToValueAtTime(1150,t+0.05);
+  g3.gain.setValueAtTime(0.0001,t); g3.gain.exponentialRampToValueAtTime(0.020,t+0.005);
+  g3.gain.exponentialRampToValueAtTime(0.0001,t+0.09);
+  o2.connect(g3).connect(A.destination); o2.start(t); o2.stop(t+0.11);
+}catch(e){} }
 function auraOnSnd(){ if(!A||!sndOK('auraOn'))return; try{
   const t=A.currentTime, dur=0.20;
   const o=A.createOscillator(), gg=A.createGain();
@@ -1786,6 +1863,51 @@ function auraOnSnd(){ if(!A||!sndOK('auraOn'))return; try{
   gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
   o.connect(bp).connect(gg).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
 }catch(e){} }
+// ★纏っている「間ずっと」鳴るオーラ音。点灯の一発だけでは、耳では今纏っているか
+//   分からなかった。ノイズ（酸が噴いている音）＋低い唸りを1本ずつ作り、
+//   gainの出し入れだけで鳴らす（毎回作り直すと実機で詰まる）
+let auraLoop=null;
+function auraLoopStart(){
+  if(!A||muted) return;
+  try{
+    if(!auraLoop){
+      const dur=1.0;
+      const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate);
+      const ch=buf.getChannelData(0);
+      for(let i=0;i<ch.length;i++) ch[i]=Math.random()*2-1;
+      const src=A.createBufferSource(); src.buffer=buf; src.loop=true;
+      const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=950; bp.Q.value=1.1;
+      const ng=A.createGain(); ng.gain.value=0.45;
+      const o=A.createOscillator(); o.type='sawtooth'; o.frequency.value=112;
+      const olp=A.createBiquadFilter(); olp.type='lowpass'; olp.frequency.value=380;
+      const og=A.createGain(); og.gain.value=0.5;
+      const gg=A.createGain(); gg.gain.value=0.0001;
+      src.connect(bp).connect(ng).connect(gg);
+      o.connect(olp).connect(og).connect(gg);
+      gg.connect(A.destination);
+      src.start(); o.start();
+      auraLoop={gg,bp,o,on:false};
+    }
+    const t=A.currentTime, gn=auraLoop.gg.gain;
+    gn.cancelScheduledValues(t); gn.setValueAtTime(Math.max(0.0001,gn.value),t);
+    gn.linearRampToValueAtTime(0.050,t+0.10);
+    auraLoop.on=true;
+  }catch(e){}
+}
+function auraLoopStop(){
+  if(!auraLoop||!A) return;
+  try{ const t=A.currentTime, gn=auraLoop.gg.gain;
+    gn.cancelScheduledValues(t); gn.setValueAtTime(Math.max(0.0001,gn.value),t);
+    gn.linearRampToValueAtTime(0.0001,t+0.18);
+    auraLoop.on=false;
+  }catch(e){}
+}
+// 速く走っているほど高く張る＝速度が音でも分かる
+function auraLoopMod(a){
+  if(!auraLoop||!auraLoop.on) return;
+  try{ auraLoop.bp.frequency.value=760+1000*Math.min(1,a);
+       auraLoop.o.frequency.value=98+58*Math.min(1,a); }catch(e){}
+}
 function auraOffSnd(){ if(!A||!sndOK('auraOff'))return; try{
   const t=A.currentTime, dur=0.16;
   const o=A.createOscillator(), gg=A.createGain();
@@ -1864,6 +1986,14 @@ function drawRod(x,y,ang,joined,alpha,weak,divp){
       }
     }
   }
+  // ★味方も同じ弧で分裂の進み具合を出す（色はミント）。
+  //   敵の桃色の弧と対になり、盤面のどこで数が動いているかが一目で分かる
+  if(divp>0 && !joined){
+    g.save(); g.rotate(-Math.PI/2);
+    g.strokeStyle='rgba(180,255,220,'+(0.20*alpha+0.55*divp)+')'; g.lineWidth=1.4; g.lineCap='round';
+    g.beginPath(); g.arc(0,0,RLEN*0.86,0,Math.PI*2*Math.min(1,divp)); g.stroke();
+    g.restore();
+  }
   g.restore(); g.globalAlpha=1;
 }
 // 敵＝ブドウ球菌。球が房状に固まった塊。鞭毛は無い＝生々しさが出ない
@@ -1924,6 +2054,15 @@ function drawFoeCocci(f,warn){
       g.save(); g.strokeStyle='rgba(74,26,54,'+(0.32+0.42*w)+')';
       g.lineWidth=Math.max(1,R*0.30*w); g.lineCap='round';
       g.beginPath(); g.moveTo(-R*0.82,0); g.lineTo(R*0.82,0); g.stroke(); g.restore();
+    }
+    // ★分裂の進み具合を弧で見せる（一周＝もうすぐ2匹になる）。
+    //   球が少しふくらむだけでは実機では全く読み取れなかった
+    if(dv>0 && !f.dead){
+      const RR=R0*1.5+sep*0.5;
+      g.save(); g.rotate(-Math.PI/2);
+      g.strokeStyle='rgba(255,170,205,'+(0.22+0.55*dv)+')'; g.lineWidth=1.5; g.lineCap='round';
+      g.beginPath(); g.arc(0,0,RR,0,Math.PI*2*Math.min(1,dv)); g.stroke();
+      g.restore();
     }
     g.restore();
   }
@@ -2079,10 +2218,17 @@ function loop(ts){
     //   薙ぎ払いも無料ではなくなる＝拾った分をどこに使うかの選択が生まれる
     if(aura>0.35 && joinedCount>0){
       auraAcc += AURA_BURN*dt;
-      while(auraAcc>=1 && joinedCount>0){ auraAcc-=1; spendChain(1); }
+      while(auraAcc>=1 && joinedCount>0){
+        auraAcc-=1;
+        burnFx=1;                       // 燃えて減ったことを指先でも見せる
+        spendChain(1);
+        if(!burnSeen){ burnSeen=true;
+          tipMsg('纏っている間は乳酸菌を燃やしている ─ 走り続けると弾薬が尽きる'); }
+      }
     } else auraAcc=0;
-    if(!wasArmed && aura>0.35){ auraOnSnd(); auraFlash=1; auraTail=0; }
-    else if(wasArmed && aura<=0.35){ auraOffSnd(); auraTail=AURA_TAIL; }   // ここから余韻
+    if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0; }
+    else if(wasArmed && aura<=0.35){ auraOffSnd(); auraLoopStop(); auraTail=AURA_TAIL; }   // ここから余韻
+    if(aura>0.35) auraLoopMod((headSpd-AURA_LO)/Math.max(1,AURA_HI-AURA_LO));
     // 余韻の間は攻撃力は無いが、触れても飛び散らない（＝減速して囲みに入れる）
     // 流れている間は守る（先が見えないまま突っ込む事故を無くす）。攻撃力は無し
     guardOn = (GUARD_FLOW>0 && Math.hypot(camVel.x,camVel.y)>GUARD_FLOW);
@@ -2126,6 +2272,9 @@ function loop(ts){
           nf.link=f; f.next=nf; nf.clen=(f.clen||0)+1;
         }else{ nf.link=null; nf.next=null; nf.clen=0; }
         f.x-=Math.cos(a)*d; f.y-=Math.sin(a)*d;
+        // 増えた瞬間を見せる（桃色の輪＋＋1）。増殖が見えないと押されている事に気づけない
+        divFx((f.x+nf.x)/2, (f.y+nf.y)/2, a, false);
+        foeDivSnd();
         // ★奪いは効きすぎる（分裂1回＝1匹だと、敵200匹で毎秒5匹取られて弾薬が枯れる）。
         //   確率にし、さらに下限を割ったら奪わない＝拾う相手が居なくなる状況を作らない
         if(livingRods()>ALLY_FLOOR && Math.random()<STEAL_P)
@@ -2176,7 +2325,7 @@ function loop(ts){
         rods.push(nr);
         r.x-=Math.cos(r.ang)*d; r.y-=Math.sin(r.ang)*d;
         // 割れた瞬間の閃光と粒（小さくても「今2つになった」が分かるように）
-        shards.push({x:(r.x+Math.cos(r.ang)*d), y:(r.y+Math.sin(r.ang)*d), life:1, good:true, small:true});
+        divFx(r.x+Math.cos(r.ang)*d*0.5, r.y+Math.sin(r.ang)*d*0.5, r.ang, true);
         for(let i=0;i<5;i++) bits.push({x:r.x+Math.cos(r.ang)*d*0.5, y:r.y+Math.sin(r.ang)*d*0.5,
           vx:rnd(-.9,.9), vy:rnd(-.9,.9), life:.55, r:rnd(.9,1.8)});
         divSnd();
@@ -2327,11 +2476,27 @@ function loop(ts){
   // 世界の縁（どこまで行けるか分かるように薄く）
   g.strokeStyle='rgba(120,200,180,.10)'; g.lineWidth=2;
   g.strokeRect(0,PLAY_TOP,worldW(),worldBot()-PLAY_TOP);
-  // ★菌がいるのはここまで。外側の帯は「回り込むための通路」＝端の敵も囲める
-  g.save(); g.strokeStyle='rgba(140,220,190,.13)'; g.lineWidth=1.4;
-  g.setLineDash([10,10]); g.lineDashOffset=-clock*8;
-  g.strokeRect(EDGE_M,PLAY_TOP+EDGE_M,worldW()-EDGE_M*2,worldBot()-PLAY_TOP-EDGE_M*2);
-  g.restore();
+  // ★菌がいるのはここまで。外側の帯は「回り込むための通路」＝端の敵も囲める。
+  //   動く点線は野暮ったかったので、外へ向かって沈む影の帯にする。
+  //   線を引かずに「ここから先は空」を明るさだけで示す＝縁が静かになる
+  {
+    const by0=PLAY_TOP, bx1=worldW(), by1=worldBot();
+    const ix0=EDGE_M, iy0=by0+EDGE_M, ix1=bx1-EDGE_M, iy1=by1-EDGE_M;
+    const band=(x,y,w,h,gx0,gy0,gx1,gy1)=>{
+      const gr=g.createLinearGradient(gx0,gy0,gx1,gy1);
+      gr.addColorStop(0,'rgba(8,24,22,0)');
+      gr.addColorStop(0.55,'rgba(8,26,26,.15)');
+      gr.addColorStop(1,'rgba(4,16,18,.40)');
+      g.fillStyle=gr; g.fillRect(x,y,w,h);
+    };
+    band(ix0,by0,ix1-ix0,EDGE_M, 0,iy0, 0,by0);        // 上
+    band(ix0,iy1,ix1-ix0,EDGE_M, 0,iy1, 0,by1);        // 下
+    band(0,by0,EDGE_M,by1-by0, ix0,0, 0,0);            // 左（角まで塗る）
+    band(ix1,by0,EDGE_M,by1-by0, ix1,0, bx1,0);        // 右
+    // 境目のかすかな明かり（線には見えない強さ）
+    g.strokeStyle='rgba(150,228,205,.06)'; g.lineWidth=1;
+    g.strokeRect(ix0+0.5,iy0+0.5,ix1-ix0-1,iy1-iy0-1);
+  }
 
   // コンボの表示。数が大きいほど大きく、ゆっくり浮いて消える
   for(let i=pops.length-1;i>=0;i--){
@@ -2354,35 +2519,98 @@ function loop(ts){
   // アンモニアの靄（敵の攻撃）＝酸を中和する領域。
   // 輪郭のある円だと"紫の玉"に見えてしまうので、ずれた靄を重ねて気体に見せる
   for(const a of ammo){
+    if(a.guard) a.guard=Math.max(0,a.guard-dt*1.4);
     if(!inView(a.x,a.y,a.r+50)) continue;
     const k=Math.min(1,a.t/0.8)*Math.min(1,(a.life-a.t)/1.8);
+    // ★毒気を強める。うっすら紫の霞だと「入ると損をする場所」に見えなかったので、
+    //   芯を濃く沈ませ、縁に苛性の黄緑を回し、境目をぎざぎざに脈打たせる
     for(let n=0;n<3;n++){
       const ang=a.ph+n*2.1+clock*0.22*(n%2?1:-1);
       const ox=Math.cos(ang)*a.r*0.22, oy=Math.sin(ang*1.3)*a.r*0.18;
       const rr=a.r*(0.78+0.16*Math.sin(clock*0.9+a.ph+n));
       const gr=g.createRadialGradient(a.x+ox,a.y+oy,0,a.x+ox,a.y+oy,rr);
-      gr.addColorStop(0,'rgba(184,132,232,'+(0.13*k)+')');
-      gr.addColorStop(0.55,'rgba(150,100,205,'+(0.085*k)+')');
-      gr.addColorStop(1,'rgba(120,80,180,0)');
+      gr.addColorStop(0,'rgba(96,44,150,'+(0.30*k)+')');
+      gr.addColorStop(0.42,'rgba(150,90,215,'+(0.17*k)+')');
+      gr.addColorStop(0.82,'rgba(196,214,120,'+(0.10*k)+')');   // 縁の苛性（アルカリ）
+      gr.addColorStop(1,'rgba(150,120,190,0)');
       g.fillStyle=gr; g.beginPath(); g.arc(a.x+ox,a.y+oy,rr,0,7); g.fill();
     }
+    // 境目＝ぎざぎざの脈。ここから内側は酸が効かないという線引きを見せる
+    const nearHead = dragging? Math.hypot(head.x-a.x,head.y-a.y) < a.r+34 : false;
+    const eg=(nearHead? 0.52:0.26)*k*(0.72+0.28*Math.sin(clock*(nearHead?9:2.4)+a.ph));
+    g.save(); g.beginPath();
+    for(let i=0;i<=40;i++){
+      const th=i/40*Math.PI*2;
+      const rr=a.r*(0.93+0.07*Math.sin(th*3+clock*1.6+a.ph)+0.04*Math.sin(th*7-clock*1.1));
+      const x=a.x+Math.cos(th)*rr, y=a.y+Math.sin(th)*rr;
+      i? g.lineTo(x,y) : g.moveTo(x,y);
+    }
+    g.closePath();
+    g.strokeStyle='rgba(206,222,130,'+eg+')'; g.lineWidth=1.4; g.stroke();
+    g.restore();
     for(let i2=0;i2<6;i2++){                                     // 立ちのぼる泡
       const t=((clock*0.42+i2*0.17+a.ph)%1);
       const bx=a.x+Math.cos(a.ph+i2*1.7)*a.r*0.46, by=a.y+a.r*0.45-t*a.r*1.15;
       g.beginPath(); g.arc(bx,by,2.6*SCALE*(1-t*0.7),0,7);
-      g.fillStyle='rgba(220,186,255,'+(0.42*k*(1-t))+')'; g.fill();
+      g.fillStyle='rgba(226,208,255,'+(0.5*k*(1-t))+')'; g.fill();
+    }
+    // 正体を名乗らせる。知育としても効くし、紫の霞が何なのかが一目で分かる
+    if(a.r>AM_R*0.5){
+      g.save(); g.font='800 '+(11*SCALE).toFixed(1)+'px system-ui,-apple-system,sans-serif';
+      g.textAlign='center'; g.textBaseline='middle';
+      g.fillStyle='rgba(224,206,255,'+(0.30*k)+')';
+      g.fillText('NH₃', a.x, a.y);
+      g.restore();
+    }
+    // 酸を弾いた直後の靄＝外へ広がる光の輪（どの靄が守ったのかが分かる）
+    if(a.guard>0){
+      const u=a.guard;
+      g.beginPath(); g.arc(a.x,a.y,a.r*(1+0.22*(1-u)),0,7);
+      g.strokeStyle='rgba(214,180,255,'+(0.55*u)+')'; g.lineWidth=1.5+2.5*u; g.stroke();
     }
   }
-  // 腐敗菌が乳酸菌を奪う瞬間
-  for(const L of lunges){ L.life-=dt*3.2;
-    if(L.life>0){
-      const t=1-L.life;
+  // ★腐敗菌が乳酸菌を奪う瞬間。まっすぐな線＝ビームは知育らしくなかったので、
+  //   実際に起きていること＝「タンパク分解酵素を吹きかけて溶かし、栄養を吸い上げる」
+  //   を粒の流れで描く。線は1本も引かない（?atk=beam で従来の線に戻せる）
+  for(const L of lunges){ L.life-=dt*(ATK==='beam'?3.2:1.9);
+    if(L.life<=0) continue;
+    const t=1-L.life;
+    if(ATK==='beam'){
       g.beginPath(); g.moveTo(L.fx,L.fy);
       g.lineTo(L.fx+(L.tx-L.fx)*Math.min(1,t*1.6), L.fy+(L.ty-L.fy)*Math.min(1,t*1.6));
       g.strokeStyle='rgba(226,120,170,'+(0.65*L.life)+')'; g.lineWidth=2.2*L.life+0.8; g.stroke();
       g.beginPath(); g.arc(L.tx,L.ty,10*(1-L.life)+3,0,7);
       g.strokeStyle='rgba(240,150,190,'+(0.5*L.life)+')'; g.lineWidth=2; g.stroke();
-    } }
+      continue;
+    }
+    const dx=L.tx-L.fx, dy=L.ty-L.fy, ln=Math.hypot(dx,dy)||1;
+    const nx=-dy/ln, ny=dx/ln;
+    // ① 酵素の粒が吹きかけられる（ふらつきながら飛ぶ＝拡散する気体・液体らしさ）
+    for(let i=0;i<5;i++){
+      const ph=t*1.6-i*0.12;
+      if(ph<0||ph>1) continue;
+      const bow=Math.sin(ph*Math.PI)*(7+(i%3)*5)*((i%2)?1:-1);
+      const px=L.fx+dx*ph+nx*bow, py=L.fy+dy*ph+ny*bow;
+      g.beginPath(); g.arc(px,py, 2.4*SCALE*(0.55+0.5*Math.sin(ph*Math.PI)),0,7);
+      g.fillStyle='rgba(238,152,192,'+(0.8*Math.min(1,L.life*1.7))+')'; g.fill();
+    }
+    // ② 届いた所が分解される（内へ縮む破線の輪）
+    if(t>0.40){
+      const u=Math.min(1,(t-0.40)/0.40);
+      g.save();
+      g.beginPath(); g.arc(L.tx,L.ty, 14*(1-u)+3, 0,7);
+      g.strokeStyle='rgba(242,172,208,'+(0.65*(1-u))+')'; g.lineWidth=1.6;
+      g.setLineDash([3,4]); g.lineDashOffset=-clock*40; g.stroke();
+      g.restore();
+      // ③ 栄養が腐敗菌へ吸い上げられる（ミントの粒が逆向きに流れる）
+      for(let i=0;i<3;i++){
+        const ph=u*1.25-i*0.2; if(ph<=0||ph>1) continue;
+        const px=L.tx+(L.fx-L.tx)*ph, py=L.ty+(L.fy-L.ty)*ph;
+        g.beginPath(); g.arc(px,py,1.9*SCALE*(1-ph*0.55),0,7);
+        g.fillStyle='rgba(184,242,212,'+(0.62*(1-ph))+')'; g.fill();
+      }
+    }
+  }
   lunges=lunges.filter(L=>L.life>0);
 
   // 連鎖球菌のつながり（首）。球の下に敷いて、融合して見えるようにする
@@ -2405,6 +2633,27 @@ function loop(ts){
   foes=foes.filter(f=>!f.gone);
   for(const f of foes){ if(f.link&&(f.link.gone||f.link.dead)) f.link=null;
                         if(f.next&&(f.next.gone||f.next.dead)) f.next=null; }
+
+  // ★アンモニアに守られて溶けなかった敵＝六角の膜が酸を弾く。
+  //   「囲ったのに溶けない」はこのゲーム唯一の例外なので、原因をその場に出す
+  for(const f of foes){
+    if(!f.shield) continue;
+    f.shield=Math.max(0, f.shield-dt*1.5);
+    if(f.shield<=0 || f.dead || !inView(f.x,f.y,70)) continue;
+    const u=f.shield, R=f.r*2.2+7, bl=0.5+0.5*Math.sin(clock*26);
+    g.save(); g.translate(f.x,f.y); g.rotate(clock*0.5);
+    g.beginPath();
+    for(let i=0;i<=6;i++){ const a=i/6*Math.PI*2, x=Math.cos(a)*R, y=Math.sin(a)*R;
+      i? g.lineTo(x,y) : g.moveTo(x,y); }
+    g.closePath();
+    g.fillStyle='rgba(158,108,222,'+(0.24*u)+')';
+    g.strokeStyle='rgba(230,200,255,'+((0.45+0.5*bl)*u)+')'; g.lineWidth=2.4;
+    g.shadowColor='rgba(190,140,255,'+(0.8*u)+')'; g.shadowBlur=10;
+    g.fill(); g.stroke(); g.shadowBlur=0;
+    g.beginPath(); g.arc(0,0,R+(1-u)*18,0,7);          // 弾かれた酸が外へ抜ける輪
+    g.strokeStyle='rgba(200,160,255,'+(0.45*u*u)+')'; g.lineWidth=1.4+2*u; g.stroke();
+    g.restore();
+  }
 
   // 封印フラッシュ
   for(const s of seals){
@@ -2431,12 +2680,18 @@ function loop(ts){
     if(b.len||b.flash||b.txt){ b.vx*=0.96; b.vy*=0.96; }
     b.life-=dt*(b.txt?1.1:(b.len?1.0:1.6));
     if(b.life<=0) continue;
-    if(b.txt){                                // 「−1」＝弾薬を1つ失った
+    if(b.txt){                                // 「−1」＝弾薬を1つ失った／「＋1」＝分裂で増えた
       const k=Math.min(1,b.life);
-      g.save(); g.font='800 '+(15*SCALE)+'px system-ui,-apple-system,sans-serif';
+      g.save(); g.font='800 '+((b.sm?12:15)*SCALE)+'px system-ui,-apple-system,sans-serif';
       g.textAlign='center'; g.textBaseline='middle';
       g.lineWidth=3; g.strokeStyle='rgba(6,14,12,'+(0.8*k)+')'; g.strokeText(b.txt,b.x,b.y);
-      g.fillStyle='rgba(255,255,255,'+(0.95*k)+')'; g.fillText(b.txt,b.x,b.y);
+      // 色で「どちらが増えた／減った」を分ける。ミント＝乳酸菌、桃＝腐敗菌
+      g.fillStyle= b.col==='mint'? 'rgba(175,255,215,'+(0.95*k)+')'
+                 : b.col==='foe' ? 'rgba(255,165,205,'+(0.95*k)+')'
+                 : b.col==='burn'? 'rgba(150,235,255,'+(0.95*k)+')'
+                 : b.col==='nh3' ? 'rgba(216,180,255,'+(0.95*k)+')'
+                 : 'rgba(255,255,255,'+(0.95*k)+')';
+      g.fillText(b.txt,b.x,b.y);
       g.restore(); continue;
     }
     if(b.flash){                              // 砕けた瞬間の白い衝撃輪
@@ -2456,7 +2711,8 @@ function loop(ts){
       g.restore(); continue;
     }
     g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7);
-    g.fillStyle= b.white? 'rgba(235,255,246,'+(0.8*b.life)+')' : 'rgba(160,245,200,'+(0.7*b.life)+')';
+    g.fillStyle= b.nh? 'rgba(214,178,255,'+(0.8*b.life)+')'
+               : b.white? 'rgba(235,255,246,'+(0.8*b.life)+')' : 'rgba(160,245,200,'+(0.7*b.life)+')';
     g.fill(); }
   bits=bits.filter(b=>b.life>0);
 
@@ -2489,10 +2745,31 @@ function loop(ts){
   }
 
   // シャッターの破片フラッシュ（弾けた地点の輪）
-  for(const s of shards){ s.life-=dt*2.6;
-    if(s.life>0){ g.beginPath(); g.arc(s.x,s.y,(1-s.life)*(s.small?16:70)+(s.small?3:8),0,7);
-      g.strokeStyle= s.good? 'rgba(180,255,225,'+((s.small?0.75:0.65)*s.life)+')' : 'rgba(255,150,120,'+(0.6*s.life)+')';
-      g.lineWidth=(s.small?1.2:3)+(s.small?1.6:6)*s.life; g.stroke(); } }
+  for(const s of shards){ s.life-=dt*(s.div?2.0:2.6);
+    if(s.life<=0) continue;
+    if(s.div){
+      // ★分裂した瞬間の輪。「いつ増えたか」が全く見えないという指摘への答え。
+      //   二重の輪＋分かれた向きへ伸びる短い光条で「割れた」を示す
+      const t=1-s.life, R=t*30+4;
+      const col= s.good? '190,255,225' : '255,170,205';
+      g.beginPath(); g.arc(s.x,s.y,R,0,7);
+      g.strokeStyle='rgba('+col+','+(0.85*s.life*s.life)+')'; g.lineWidth=1.2+2.6*s.life; g.stroke();
+      g.beginPath(); g.arc(s.x,s.y,R*0.55,0,7);
+      g.strokeStyle='rgba('+col+','+(0.45*s.life)+')'; g.lineWidth=1+1.6*s.life; g.stroke();
+      if(s.ang!=null){
+        const L=6+16*t;
+        g.beginPath();
+        g.moveTo(s.x+Math.cos(s.ang)*L*0.4, s.y+Math.sin(s.ang)*L*0.4);
+        g.lineTo(s.x+Math.cos(s.ang)*L,     s.y+Math.sin(s.ang)*L);
+        g.moveTo(s.x-Math.cos(s.ang)*L*0.4, s.y-Math.sin(s.ang)*L*0.4);
+        g.lineTo(s.x-Math.cos(s.ang)*L,     s.y-Math.sin(s.ang)*L);
+        g.strokeStyle='rgba('+col+','+(0.7*s.life)+')'; g.lineWidth=1.6*s.life+0.6; g.stroke();
+      }
+      continue;
+    }
+    g.beginPath(); g.arc(s.x,s.y,(1-s.life)*(s.small?16:70)+(s.small?3:8),0,7);
+    g.strokeStyle= s.good? 'rgba(180,255,225,'+((s.small?0.75:0.65)*s.life)+')' : 'rgba(255,150,120,'+(0.6*s.life)+')';
+    g.lineWidth=(s.small?1.2:3)+(s.small?1.6:6)*s.life; g.stroke(); }
   shards=shards.filter(s=>s.life>0);
 
   // 乳酸桿菌の連なり（首）
@@ -2649,7 +2926,8 @@ function loop(ts){
     // 鎖に埋もれないよう、暗いバッジを敷いて指先の上に浮かせる
     // ★指は物理的に8〜10mm＝55〜64px を覆う。30pxでは指の下に隠れるので離す。
     //   画面上端に近い時は指の下側に回す
-    const br=17;
+    ammoFlash=Math.max(0, ammoFlash-dt*2.6);
+    const br=17*(1+0.30*ammoFlash);
     const bx=Math.max(viewX()+br/zoom+4, Math.min(viewX()+viewW()-br/zoom-4, head.x));
     const by=(head.y-56 < viewY()+(br+50)/zoom)? head.y+56 : head.y-56;
     g.save();
@@ -2657,8 +2935,24 @@ function loop(ts){
     g.fillStyle='rgba(6,14,12,.82)'; g.fill();
     g.strokeStyle= joinedCount? 'rgba(140,250,200,.95)' : 'rgba(255,140,110,.95)';
     g.lineWidth=2; g.stroke();
-    g.font='800 18px system-ui,-apple-system,sans-serif'; g.textAlign='center'; g.textBaseline='middle';
-    g.fillStyle= joinedCount? '#a6ffd4' : '#ff9a80';
+    // ★オーラで燃えている間の「燃焼計」＝一周したら1匹消える。
+    //   走っているだけで弾薬が減っていることが、減る前から見える
+    if(aura>0.35 && joinedCount>0){
+      g.beginPath(); g.arc(bx,by,br+5,0,7);                       // 溝（残りが見えるように）
+      g.strokeStyle='rgba(20,60,80,.85)'; g.lineWidth=4.5; g.stroke();
+      g.beginPath(); g.arc(bx,by,br+5,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,auraAcc));
+      g.strokeStyle='rgba(140,235,255,.98)'; g.lineWidth=4; g.lineCap='round';
+      g.shadowColor='rgba(120,225,255,.9)'; g.shadowBlur=8; g.stroke(); g.shadowBlur=0;
+    }
+    // 減った瞬間＝弾ける輪と数字の色替え（自分の残弾が動いた事に気づける）
+    if(ammoFlash>0){
+      g.beginPath(); g.arc(bx,by,br+6+22*(1-ammoFlash),0,7);
+      g.strokeStyle='rgba(150,235,255,'+(0.8*ammoFlash*ammoFlash)+')';
+      g.lineWidth=1+3*ammoFlash; g.stroke();
+    }
+    g.font='800 '+(18*(1+0.22*ammoFlash)).toFixed(1)+'px system-ui,-apple-system,sans-serif';
+    g.textAlign='center'; g.textBaseline='middle';
+    g.fillStyle= ammoFlash>0.35? '#d8f4ff' : (joinedCount? '#a6ffd4' : '#ff9a80');
     g.fillText(joinedCount, bx, by+1);
     g.restore(); g.shadowBlur=0;
   }
