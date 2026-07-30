@@ -175,7 +175,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v98 (07-30 08:26)';
+const BUILD='v99 (07-30 09:16)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -812,6 +812,7 @@ function scatter(){
       wa:rnd(0,6.283), ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
   }
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
+  makeStartChains();          // ★最初から連なっているものを混ぜる
   bits=[]; seals=[]; shards=[]; pops=[]; combo=0; comboT=-9; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; lead={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
@@ -819,6 +820,58 @@ function scatter(){
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
   updateHud(); updateBar();
+}
+// ★開始時に全部が単体だと「分裂して連なる」という姿が伝わらないので、
+//   最初から連鎖になっているものを混ぜる。頭数は変えず（100対100のまま）、
+//   位置を隣へ寄せて繋ぐだけ。間隔は普段の拘束と同じ目標値にして、開始直後に跳ねないようにする
+const START_CHAIN=Math.max(0,Math.min(1,+(_q.get('startchain')||0.45)));  // 連鎖に組み込む割合
+function makeStartChains(){
+  if(START_CHAIN<=0) return;
+  const shuffle=(a)=>{ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0;
+    const t=a[i]; a[i]=a[j]; a[j]=t; } return a; };
+  // 長さの分布：2匹が多く、まれに長い
+  const pick=(cap)=>{ const r=Math.random();
+    const n=(r<0.52)?2:(r<0.80)?3:(r<0.93)?4:(r<0.98)?5:6; return Math.min(n,cap); };
+  // ① 乳酸桿菌：向きを揃えて端どうしを繋ぐ（柵状）
+  {
+    const list=shuffle(rods.filter(r=>!r.dead));
+    let i=0;
+    while(i<list.length){
+      let n=1;
+      if(Math.random()<START_CHAIN) n=pick(Math.min(ROD_CHAIN, list.length-i));
+      if(n>=2){
+        const seed=list[i], ang=seed.ang, d=RLEN*0.92;
+        for(let k=1;k<n;k++){
+          const m=list[i+k], prev=list[i+k-1];
+          m.x=Math.max(EDGE_M, Math.min(worldW()-EDGE_M, seed.x+Math.cos(ang)*d*k));
+          m.y=Math.max(PLAY_TOP+EDGE_M, Math.min(worldBot()-EDGE_M, seed.y+Math.sin(ang)*d*k));
+          m.ang=ang; m.wa=seed.wa; m.ws=seed.ws;
+          m.link=prev; prev.next=m; m.clen=k;
+        }
+      }
+      i+=n;
+    }
+  }
+  // ② 腐敗菌：連鎖球菌なので数珠に（房の見た目の時は繋がない）
+  if(FOE_SHAPE==='cocci'){
+    const list=shuffle(foes.filter(f=>!f.dead));
+    let i=0;
+    while(i<list.length){
+      let n=1;
+      if(Math.random()<START_CHAIN) n=pick(Math.min(CHAIN_MAX, list.length-i));
+      if(n>=2){
+        const seed=list[i], ang=Math.random()*Math.PI*2;
+        for(let k=1;k<n;k++){
+          const m=list[i+k], prev=list[i+k-1], d=(m.r+prev.r)*0.90;
+          m.x=Math.max(EDGE_M, Math.min(worldW()-EDGE_M, prev.x+Math.cos(ang)*d));
+          m.y=Math.max(PLAY_TOP+EDGE_M, Math.min(worldBot()-EDGE_M, prev.y+Math.sin(ang)*d));
+          m.wa=seed.wa; m.ws=seed.ws;
+          m.link=prev; prev.next=m; m.clen=k;
+        }
+      }
+      i+=n;
+    }
+  }
 }
 // 腐敗に押しのけられた乳酸菌を1匹消す（掴んでいる桿菌は奪われない）
 let lunges=[];   // 腐敗菌が乳酸菌に襲いかかる線（見せるためだけ）
