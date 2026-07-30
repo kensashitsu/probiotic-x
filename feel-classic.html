@@ -273,7 +273,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v110 (07-30 15:36)';
+const BUILD='v111 (07-30 16:26)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -873,8 +873,12 @@ const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
 //   実機で詰められるよう ?diff=easy|normal|hard を用意した（覚えるのが2つだと面倒なので）
 const DIFF=(function(){ const v=(_q.get('diff')||'').toLowerCase();
   return (v==='easy'||v==='normal'||v==='hard'||v==='ultra')? v : 'normal'; })();
-const _D={easy:{gf:0.018, ga:0.052}, normal:{gf:0.022, ga:0.046},
-          hard:{gf:0.028, ga:0.040}, ultra:{gf:0.036, ga:0.034}}[DIFF]||{gf:0.022,ga:0.046};
+// ★v111：回収（溶かした腐敗菌が栄養になる）を入れた分、乳酸菌の【自然増殖】を下げた。
+//   放っておいても味方が増える状態だと弾薬が余り、難易度が下がる（実機で判明）。
+//   弾薬の主な出どころを「増殖」から「戦って回収する」に移すのが狙い。
+//   実測（自動プレイ）：拾える菌の平均 102〜170匹 → 83〜138匹
+const _D={easy:{gf:0.018, ga:0.046}, normal:{gf:0.022, ga:0.038},
+          hard:{gf:0.026, ga:0.034}, ultra:{gf:0.032, ga:0.030}}[DIFF]||{gf:0.022,ga:0.038};
 const GF=+(_q.get('gf')||_D.gf);   // 腐敗菌1匹あたりの分裂速度（/秒）
 const GA=+(_q.get('ga')||_D.ga);   // 乳酸菌1匹あたりの分裂速度（/秒）
 const STEAL_N=+(_q.get('steal')||1);   // 腐敗菌1回の分裂で奪う乳酸菌の数
@@ -1067,13 +1071,18 @@ function killAllyNear(x,y,R){
 //   放置よりも戦った方が負ける、という逆立ちした収支になっていた（実機で判明）。
 //   実際の発酵でも、死んだ菌体は分解されて他の菌の栄養になる
 const REFUND=+(_q.get('refund')||0.6);   // 腐敗菌1匹あたり何匹の乳酸菌が湧くか
+// ★ここが効きすぎると今度は弾薬が余って易しくなる（実機で判明）。
+//   ゲージ（頭数）には即座に効かせるが、弾薬としては【すぐには使えない】ようにする＝
+//   湧いたばかりの菌はまだ酸を出せない（実際、分裂直後の菌は代謝が立ち上がっていない）。
+//   これで「戦えば勝ちに近づくが、弾薬は相変わらず自分で集めるもの」に分けられる
+const REF_WAIT=+(_q.get('refwait')||9);
 let refAcc=0, refundSeen=false;
 function spawnAllyAt(x,y){
   const ang=Math.random()*Math.PI*2;
   rods.push({x:Math.max(EDGE_M,Math.min(worldW()-EDGE_M,x+rnd(-14,14))),
              y:Math.max(PLAY_TOP+EDGE_M,Math.min(worldBot()-EDGE_M,y+rnd(-14,14))),
              ang, joined:false, order:0, phase:Math.random()*6.28,
-             vx:0,vy:0,vr:0, doom:0, spent:0, dead:false, born:clock,
+             vx:0,vy:0,vr:0, doom:0, spent:REF_WAIT, dead:false, born:clock,
              wa:Math.random()*6.28, ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
   divFx(x,y,ang,true);
 }
@@ -1090,7 +1099,7 @@ function refundAllies(spots){
     if(n>24) break;                    // 保険
   }
   if(n>0 && !refundSeen){ refundSeen=true;
-    tipMsg('溶けた腐敗菌は栄養になる ─ 大きく溶かすほど乳酸菌が増えて弾薬が返る'); }
+    tipMsg('溶けた腐敗菌は栄養になり乳酸菌が増える ─ ただし生まれたては酸を出せない'); }
   return n;
 }
 // 掴まれている間の進行と、奪われた瞬間
