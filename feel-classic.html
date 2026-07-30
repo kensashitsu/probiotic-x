@@ -49,6 +49,12 @@
   #nums b{color:#bfe9d2;font-weight:800;font-size:12.5px}
   #nums .foodname{color:#cfe8dd;font-weight:800;font-size:12px;letter-spacing:.06em}
   #nums .s2 b{color:#ea9ec0}
+  /* ★弾薬（今つないでいる鎖）。指先のバッジは指で隠れて見えないので、HUDに出す。
+     減った瞬間だけ青く弾ける＝オーラで燃えているのが手元を見なくても分かる */
+  #nums .s4 b{color:#a6ffd4}
+  #nums .s4.burn b{color:#d8f4ff;text-shadow:0 0 8px rgba(120,225,255,.95)}
+  #nums .s4.burn{transform:scale(1.14)}
+  #nums .s4{transition:transform .12s ease-out}
   #nums .tm b{font-size:14px;color:#bfe9d2}
   #nums .s3{margin-left:auto}
   #reset{pointer-events:auto;font:inherit;font-size:10.5px;font-weight:700;color:#9fb3ac;
@@ -193,6 +199,7 @@
     <span class="tm">残り <b id="tleft">90</b></span>
     <span class="s1">乳酸菌 <b id="nAlly">0</b></span>
     <span class="s2">腐敗菌 <b id="nFoe">0</b></span>
+    <span class="s4" id="chainbox">鎖 <b id="nChain">0</b></span>
     <span class="s3">溶かした <b id="cnt">0</b></span>
     <button id="sndbtn" title="テスト音">🔊</button>
     <button id="reset">やり直す</button>
@@ -262,7 +269,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v107 (07-30 13:26)';
+const BUILD='v108 (07-30 14:08)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -280,6 +287,7 @@ const elAlly=document.getElementById('nAlly'), elFoe=document.getElementById('nF
 const elBarL=document.getElementById('barL'), elBarMid=document.getElementById('barMid');
 const elPcL=document.getElementById('pcL'), elPcR=document.getElementById('pcR');
 const elTime=document.getElementById('tleft');
+const elChain=document.getElementById('nChain'), elChainBox=document.getElementById('chainbox');
 const elOver=document.getElementById('over'), elOverT=document.getElementById('overTtl'),
       elOverS=document.getElementById('overSub');
 let W,H,DPR,portrait=false;
@@ -457,9 +465,11 @@ const PARK_TOUCH=+(_q.get('parkt')||1.40);
 const PARK_FADE=+(_q.get('parkf')||0.60);
 const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めている」
 let parkT=0, camW=1, isMouse=false;
-// ★オーラ中に毎秒失う桿菌の数。0.8では減っている実感が無く、
-//   薙ぎ払いが実質タダだったので上げる（1.8＝約0.55秒ごとに1匹）
-const AURA_BURN=+(_q.get('burn')||1.8);
+// ★オーラ中に毎秒失う桿菌の数。この盤面の広さだと1回の疾走は1秒以内なので、
+//   毎秒1〜2匹では「減った」と分からなかった。4匹/秒＝0.25秒ごとに1匹。
+//   さらに纏った瞬間に点火代を1匹取る（短く点いた時も必ず代金が発生する）
+const AURA_BURN=+(_q.get('burn')||4.0);
+const AURA_IGNITE=+(_q.get('ignite')||1);
 let auraAcc=0;
 let burnFx=0;        // 今の消費がオーラ由来か（表示の色分け用）
 let burnSeen=false;  // 燃焼の説明を出したか
@@ -1003,6 +1013,7 @@ function makeStartChains(){
 let lunges=[];   // 腐敗菌が乳酸菌を奪う様子（見せるためだけ）
 // 攻撃の見せ方。enzyme＝酵素の粒を吹きかけて溶かし栄養を吸う（既定）／beam＝昔の線
 const ATK=(_q.get('atk')||'enzyme');
+let _stealTxtT=-9;
 function killAllyNear(x,y,R){
   let bi=-1, bd=R;
   for(let i=0;i<rods.length;i++){ const r=rods[i];
@@ -1016,6 +1027,17 @@ function killAllyNear(x,y,R){
     const d=Math.hypot(f.x-r.x,f.y-r.y); if(d<nd){ nd=d; nf=f; } }
   if(nf && nd<420){ lunges.push({fx:nf.x,fy:nf.y,tx:r.x,ty:r.y,life:1}); nf.lunge=1; }
   for(let i=0;i<5;i++) bits.push({x:r.x,y:r.y, vx:rnd(-.7,.7),vy:rnd(-.9,.2), life:.8, r:rnd(.9,2.0)});
+  // ★「攻撃されたことに気付けない」対策。奪われた側にも桃色の粒と「−1」を出し、
+  //   画面内なら弾ける輪も足す（数が減っているのに画面では何も起きていなかった）
+  if(inView(r.x,r.y,30)){
+    for(let i=0;i<7;i++) bits.push({x:r.x,y:r.y, vx:rnd(-1.4,1.4),vy:rnd(-1.6,.4),
+      life:.9, r:rnd(1.1,2.4), nh2:1});
+    shards.push({x:r.x, y:r.y, life:1, small:true});     // 桃色の輪
+    if(clock-_stealTxtT>0.28){
+      _stealTxtT=clock;
+      bits.push({x:r.x, y:r.y-10, vx:0, vy:-0.55, life:1.2, r:1, txt:'-1', col:'foe'});
+    }
+  }
   return true;
 }
 function spawnFoe(){
@@ -1243,6 +1265,7 @@ function doSeal(poly){
     if(!hit){ for(const q of poly){ if(Math.hypot(q.x-a.x,q.y-a.y)<a.r){ hit=true; break; } } }
     if(!hit) continue;
     a.max=(a.max||AM_R) - (AM_CUT0+AM_CUT1*joinedCount)*SCALE;
+    a.cut=1;                      // pHメーターの針が動いた合図
     shrunk++;
     for(let i=0;i<10;i++) bits.push({x:a.x+rnd(-1,1)*a.r*0.6, y:a.y+rnd(-1,1)*a.r*0.6,
       vx:rnd(-1.2,1.2), vy:rnd(-1.6,0.3), life:.9, r:rnd(1.2,2.8)});
@@ -1276,6 +1299,13 @@ function doSeal(poly){
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
     updateHud();
     fizz(sealed, joinedCount);
+    // ★溶かした所に乳酸の化学式を出す（アンモニアのNH₃と対になる）。
+    //   どちらの化学が勝ったのかが、そのまま画面に出る
+    {
+      let cx=0, cy=0; for(const q of poly){ cx+=q.x; cy+=q.y; }
+      cx/=poly.length; cy/=poly.length;
+      bits.push({x:cx, y:cy+16, vx:0, vy:-0.35, life:1.5, r:1, txt:'C₃H₆O₃', col:'mint', sm:1});
+    }
     // ※倒した分を湧き直させない。腐敗菌は自分で増えるのが唯一の供給源なので、
     //   押し切れば本当に減っていく＝ゲージが進む
     if(combo>=2){
@@ -1351,10 +1381,11 @@ function spendChain(n){
     joinedCount--;
   }
   if(cost>0){ crackSnd(); ammoFlash=1; }
-  // ★燃えた分は尻尾で消える＝画面外になりがちなので、指先にも青い「−1」を出す。
-  //   走っているだけで弾薬が溶けている事は、指元で分からないと意味が無い
+  // ★燃えた分は尻尾で消える＝画面外になりがちなので、指の斜め上にも青い「−1」を出す
+  //   （指の真下は指で隠れて見えない）。あわせてHUDの「鎖」を青く弾かせる
   if(cost>0 && burnFx && dragging)
-    bits.push({x:head.x+16, y:head.y-22, vx:0.25, vy:-0.8, life:1.0, r:1, txt:'-1', col:'burn', sm:1});
+    bits.push({x:head.x-30, y:head.y-44, vx:-0.3, vy:-0.9, life:1.1, r:1, txt:'-'+cost, col:'burn'});
+  if(cost>0) updateChain(!!burnFx);
   burnFx=0;
   const rest=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
   orderSeq=0; for(const r of rest) r.order=orderSeq++;
@@ -1382,13 +1413,22 @@ function divFx(x,y,ang,good){
   const key=good?'a':'f';
   if(inView(x,y,24) && clock-_divTxtT[key]>0.20){
     _divTxtT[key]=clock;
-    bits.push({x, y:y-9, vx:0, vy:-0.5, life:1.15, r:1, txt:'＋1', col:good?'mint':'foe', sm:1});
+    bits.push({x, y:y-10, vx:0, vy:-0.62, life:1.35, r:1, txt:'＋1', col:good?'mint':'foe'});
   }
 }
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
 function updateHud(){
   elCnt.textContent=totalSealed;
   elAlly.textContent=livingRods(); elFoe.textContent=livingFoes();
+}
+// 鎖（弾薬）の表示。減った時だけ青く弾ける
+let _chainShown=-1, _chainBurnT=-9;
+function updateChain(burn){
+  const n=joinedCount;
+  if(n!==_chainShown){ _chainShown=n; elChain.textContent=n; }
+  if(burn){ _chainBurnT=clock; elChainBox.classList.add('burn'); }
+  else if(elChainBox.classList.contains('burn') && clock-_chainBurnT>0.18)
+    elChainBox.classList.remove('burn');
 }
 
 // --- 鎖が腐敗菌に触れたら四散（両側リスク）---
@@ -1876,11 +1916,11 @@ function auraLoopStart(){
       const ch=buf.getChannelData(0);
       for(let i=0;i<ch.length;i++) ch[i]=Math.random()*2-1;
       const src=A.createBufferSource(); src.buffer=buf; src.loop=true;
-      const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=950; bp.Q.value=1.1;
-      const ng=A.createGain(); ng.gain.value=0.45;
-      const o=A.createOscillator(); o.type='sawtooth'; o.frequency.value=112;
-      const olp=A.createBiquadFilter(); olp.type='lowpass'; olp.frequency.value=380;
-      const og=A.createGain(); og.gain.value=0.5;
+      const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1600; bp.Q.value=0.8;
+      const ng=A.createGain(); ng.gain.value=0.7;
+      const o=A.createOscillator(); o.type='sawtooth'; o.frequency.value=124;
+      const olp=A.createBiquadFilter(); olp.type='lowpass'; olp.frequency.value=520;
+      const og=A.createGain(); og.gain.value=0.45;
       const gg=A.createGain(); gg.gain.value=0.0001;
       src.connect(bp).connect(ng).connect(gg);
       o.connect(olp).connect(og).connect(gg);
@@ -1888,9 +1928,12 @@ function auraLoopStart(){
       src.start(); o.start();
       auraLoop={gg,bp,o,on:false};
     }
+    // ★実機で「まったく聞こえない」と言われたので大幅に上げた（0.05→0.22）。
+    //   単発の音が0.10〜0.28なので、鳴り続ける音でも同じ水準が必要だった。
+    //   立ち上がりも0.10→0.03秒（疾走は1秒以内で終わるため、遅いと鳴る前に消える）
     const t=A.currentTime, gn=auraLoop.gg.gain;
     gn.cancelScheduledValues(t); gn.setValueAtTime(Math.max(0.0001,gn.value),t);
-    gn.linearRampToValueAtTime(0.050,t+0.10);
+    gn.linearRampToValueAtTime(0.22,t+0.03);
     auraLoop.on=true;
   }catch(e){}
 }
@@ -1898,7 +1941,7 @@ function auraLoopStop(){
   if(!auraLoop||!A) return;
   try{ const t=A.currentTime, gn=auraLoop.gg.gain;
     gn.cancelScheduledValues(t); gn.setValueAtTime(Math.max(0.0001,gn.value),t);
-    gn.linearRampToValueAtTime(0.0001,t+0.18);
+    gn.linearRampToValueAtTime(0.0001,t+0.14);
     auraLoop.on=false;
   }catch(e){}
 }
@@ -1989,9 +2032,14 @@ function drawRod(x,y,ang,joined,alpha,weak,divp){
   // ★味方も同じ弧で分裂の進み具合を出す（色はミント）。
   //   敵の桃色の弧と対になり、盤面のどこで数が動いているかが一目で分かる
   if(divp>0 && !joined){
+    const RR=RLEN*0.88;
     g.save(); g.rotate(-Math.PI/2);
-    g.strokeStyle='rgba(180,255,220,'+(0.20*alpha+0.55*divp)+')'; g.lineWidth=1.4; g.lineCap='round';
-    g.beginPath(); g.arc(0,0,RLEN*0.86,0,Math.PI*2*Math.min(1,divp)); g.stroke();
+    g.strokeStyle='rgba(40,70,64,.55)'; g.lineWidth=2.4;
+    g.beginPath(); g.arc(0,0,RR,0,7); g.stroke();
+    if(divp>0.75){ g.shadowColor='rgba(170,255,220,.95)'; g.shadowBlur=8; }
+    g.strokeStyle='rgba(190,255,228,'+(0.45+0.55*divp)+')'; g.lineWidth=2.2; g.lineCap='round';
+    g.beginPath(); g.arc(0,0,RR,0,Math.PI*2*Math.min(1,divp)); g.stroke();
+    g.shadowBlur=0;
     g.restore();
   }
   g.restore(); g.globalAlpha=1;
@@ -2058,10 +2106,15 @@ function drawFoeCocci(f,warn){
     // ★分裂の進み具合を弧で見せる（一周＝もうすぐ2匹になる）。
     //   球が少しふくらむだけでは実機では全く読み取れなかった
     if(dv>0 && !f.dead){
-      const RR=R0*1.5+sep*0.5;
+      const RR=R0*1.55+sep*0.5;
       g.save(); g.rotate(-Math.PI/2);
-      g.strokeStyle='rgba(255,170,205,'+(0.22+0.55*dv)+')'; g.lineWidth=1.5; g.lineCap='round';
+      // 溝を敷いてから弧を引く＝どこまで進んだかが小さくても読める
+      g.strokeStyle='rgba(90,40,70,.55)'; g.lineWidth=2.6;
+      g.beginPath(); g.arc(0,0,RR,0,7); g.stroke();
+      if(dv>0.75){ g.shadowColor='rgba(255,150,200,.95)'; g.shadowBlur=8; }   // 直前は光る
+      g.strokeStyle='rgba(255,180,212,'+(0.5+0.5*dv)+')'; g.lineWidth=2.4; g.lineCap='round';
       g.beginPath(); g.arc(0,0,RR,0,Math.PI*2*Math.min(1,dv)); g.stroke();
+      g.shadowBlur=0;
       g.restore();
     }
     g.restore();
@@ -2222,11 +2275,12 @@ function loop(ts){
         auraAcc-=1;
         burnFx=1;                       // 燃えて減ったことを指先でも見せる
         spendChain(1);
-        if(!burnSeen){ burnSeen=true;
-          tipMsg('纏っている間は乳酸菌を燃やしている ─ 走り続けると弾薬が尽きる'); }
       }
     } else auraAcc=0;
-    if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0; }
+    if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0;
+      if(AURA_IGNITE>0 && joinedCount>0){ burnFx=1; spendChain(AURA_IGNITE); }   // 点火代
+      if(!burnSeen){ burnSeen=true;
+        tipMsg('纏うと乳酸菌を燃やす ─ 点火に1匹＋毎秒4匹（鎖の数はHUDの「鎖」）'); } }
     else if(wasArmed && aura<=0.35){ auraOffSnd(); auraLoopStop(); auraTail=AURA_TAIL; }   // ここから余韻
     if(aura>0.35) auraLoopMod((headSpd-AURA_LO)/Math.max(1,AURA_HI-AURA_LO));
     // 余韻の間は攻撃力は無いが、触れても飛び散らない（＝減速して囲みに入れる）
@@ -2273,8 +2327,7 @@ function loop(ts){
         }else{ nf.link=null; nf.next=null; nf.clen=0; }
         f.x-=Math.cos(a)*d; f.y-=Math.sin(a)*d;
         // 増えた瞬間を見せる（桃色の輪＋＋1）。増殖が見えないと押されている事に気づけない
-        divFx((f.x+nf.x)/2, (f.y+nf.y)/2, a, false);
-        foeDivSnd();
+        divFx((f.x+nf.x)/2, (f.y+nf.y)/2, a, false);   // 音は付けない（見た目だけで知らせる）
         // ★奪いは効きすぎる（分裂1回＝1匹だと、敵200匹で毎秒5匹取られて弾薬が枯れる）。
         //   確率にし、さらに下限を割ったら奪わない＝拾う相手が居なくなる状況を作らない
         if(livingRods()>ALLY_FLOOR && Math.random()<STEAL_P)
@@ -2328,7 +2381,7 @@ function loop(ts){
         divFx(r.x+Math.cos(r.ang)*d*0.5, r.y+Math.sin(r.ang)*d*0.5, r.ang, true);
         for(let i=0;i<5;i++) bits.push({x:r.x+Math.cos(r.ang)*d*0.5, y:r.y+Math.sin(r.ang)*d*0.5,
           vx:rnd(-.9,.9), vy:rnd(-.9,.9), life:.55, r:rnd(.9,1.8)});
-        divSnd();
+        // ★分裂の音は廃止。数が多いので鳴らすほど雑音になり、見た目の方が読める
         if(!divSeen){ divSeen=true; tipMsg('乳酸菌は伸びて真ん中に隔壁ができ、2つに分かれる＝二分裂'); }
       }
     }
@@ -2337,7 +2390,7 @@ function loop(ts){
     const target=(nA+nF>0)? nA/(nA+nF) : 0.5;
     gauge += (target-gauge)*Math.min(1, dt*GAUGE_SPD*6);
     gauge=Math.max(0,Math.min(1,gauge));
-    updateBar();
+    updateBar(); updateChain(false);
     const left=Math.max(0,TIME_LIMIT-playT);
     elTime.textContent=Math.ceil(left);
     elTime.style.color= left<=10? '#ff9a80' : '#bfe9d2';
@@ -2562,6 +2615,39 @@ function loop(ts){
       g.fillText('NH₃', a.x, a.y);
       g.restore();
     }
+    // ★靄ごとのpHメーター。囲って中和した分だけ、針が右（アルカリ）から左（酸性）へ滑る。
+    //   「削れているのか分からない」への答え＝残量を数字と位置の両方で見せる
+    if(a.r>AM_R*0.30){
+      const fr=Math.max(0,Math.min(1,(a.max||AM_R)/AM_R));
+      if(a.shown==null) a.shown=fr;
+      a.shown += (fr-a.shown)*Math.min(1,dt*5.5);
+      if(a.cut) a.cut=Math.max(0,a.cut-dt*1.6);
+      const bw=58*SCALE, bh=6*SCALE, bx0=a.x-bw/2, by0=a.y-a.r*0.78-13*SCALE;
+      g.save();
+      g.globalAlpha=Math.min(1,k*1.2);
+      // 目盛りの帯：左＝乳酸（ミント）／右＝アンモニア（紫）
+      const gr2=g.createLinearGradient(bx0,0,bx0+bw,0);
+      gr2.addColorStop(0,'rgba(120,240,190,.85)');
+      gr2.addColorStop(0.5,'rgba(150,190,190,.55)');
+      gr2.addColorStop(1,'rgba(180,120,240,.85)');
+      g.fillStyle='rgba(8,16,20,.72)';
+      g.fillRect(bx0-1.5,by0-1.5,bw+3,bh+3);
+      g.fillStyle=gr2; g.fillRect(bx0,by0,bw,bh);
+      // 針（今のアルカリの強さ）
+      const px=bx0+bw*a.shown;
+      g.fillStyle= a.cut>0? 'rgba(190,255,225,1)' : 'rgba(255,255,255,.95)';
+      g.fillRect(px-1.4, by0-3.5, 2.8, bh+7);
+      if(a.cut>0){                                  // 中和した瞬間だけ光る
+        g.strokeStyle='rgba(160,255,215,'+(0.85*a.cut)+')'; g.lineWidth=1.6;
+        g.strokeRect(bx0-2.5,by0-2.5,bw+5,bh+5);
+      }
+      // pHの数字（アルカリ9.0 → 中性寄り6.5）
+      g.font='800 '+(9.5*SCALE).toFixed(1)+'px system-ui,-apple-system,sans-serif';
+      g.textAlign='center'; g.textBaseline='bottom';
+      g.fillStyle= a.cut>0? 'rgba(190,255,225,.98)' : 'rgba(226,212,255,.8)';
+      g.fillText('pH '+(6.5+2.5*a.shown).toFixed(1), a.x, by0-4.5);
+      g.restore();
+    }
     // 酸を弾いた直後の靄＝外へ広がる光の輪（どの靄が守ったのかが分かる）
     if(a.guard>0){
       const u=a.guard;
@@ -2572,7 +2658,7 @@ function loop(ts){
   // ★腐敗菌が乳酸菌を奪う瞬間。まっすぐな線＝ビームは知育らしくなかったので、
   //   実際に起きていること＝「タンパク分解酵素を吹きかけて溶かし、栄養を吸い上げる」
   //   を粒の流れで描く。線は1本も引かない（?atk=beam で従来の線に戻せる）
-  for(const L of lunges){ L.life-=dt*(ATK==='beam'?3.2:1.9);
+  for(const L of lunges){ L.life-=dt*(ATK==='beam'?3.2:1.25);   // 0.8秒かけて見せる
     if(L.life<=0) continue;
     const t=1-L.life;
     if(ATK==='beam'){
@@ -2585,22 +2671,33 @@ function loop(ts){
     }
     const dx=L.tx-L.fx, dy=L.ty-L.fy, ln=Math.hypot(dx,dy)||1;
     const nx=-dy/ln, ny=dx/ln;
-    // ① 酵素の粒が吹きかけられる（ふらつきながら飛ぶ＝拡散する気体・液体らしさ）
-    for(let i=0;i<5;i++){
-      const ph=t*1.6-i*0.12;
+    // ① 酵素の粒が吹きかけられる（ふらつきながら飛ぶ＝拡散する気体・液体らしさ）。
+    //    ★実機で「攻撃に気付けない」と言われたので、数も大きさも光も強くした
+    g.save();
+    g.shadowColor='rgba(255,120,180,.9)'; g.shadowBlur=8;
+    for(let i=0;i<8;i++){
+      const ph=t*1.5-i*0.085;
       if(ph<0||ph>1) continue;
-      const bow=Math.sin(ph*Math.PI)*(7+(i%3)*5)*((i%2)?1:-1);
+      const bow=Math.sin(ph*Math.PI)*(9+(i%4)*6)*((i%2)?1:-1);
       const px=L.fx+dx*ph+nx*bow, py=L.fy+dy*ph+ny*bow;
-      g.beginPath(); g.arc(px,py, 2.4*SCALE*(0.55+0.5*Math.sin(ph*Math.PI)),0,7);
-      g.fillStyle='rgba(238,152,192,'+(0.8*Math.min(1,L.life*1.7))+')'; g.fill();
+      g.beginPath(); g.arc(px,py, 3.6*SCALE*(0.55+0.5*Math.sin(ph*Math.PI)),0,7);
+      g.fillStyle='rgba(255,168,206,'+(0.9*Math.min(1,L.life*1.7))+')'; g.fill();
+    }
+    g.restore();
+    // 出どころ＝どの腐敗菌が吹いているかを光らせる（0.25秒だけ）
+    if(t<0.32){
+      const u=1-t/0.32;
+      g.beginPath(); g.arc(L.fx,L.fy, 9+16*(1-u), 0,7);
+      g.strokeStyle='rgba(255,150,195,'+(0.6*u)+')'; g.lineWidth=1.4+2*u; g.stroke();
     }
     // ② 届いた所が分解される（内へ縮む破線の輪）
     if(t>0.40){
       const u=Math.min(1,(t-0.40)/0.40);
       g.save();
-      g.beginPath(); g.arc(L.tx,L.ty, 14*(1-u)+3, 0,7);
-      g.strokeStyle='rgba(242,172,208,'+(0.65*(1-u))+')'; g.lineWidth=1.6;
-      g.setLineDash([3,4]); g.lineDashOffset=-clock*40; g.stroke();
+      g.beginPath(); g.arc(L.tx,L.ty, 22*(1-u)+4, 0,7);
+      g.strokeStyle='rgba(255,170,208,'+(0.85*(1-u))+')'; g.lineWidth=2.2;
+      g.setLineDash([3,4]); g.lineDashOffset=-clock*40;
+      g.shadowColor='rgba(255,120,180,.8)'; g.shadowBlur=8; g.stroke();
       g.restore();
       // ③ 栄養が腐敗菌へ吸い上げられる（ミントの粒が逆向きに流れる）
       for(let i=0;i<3;i++){
@@ -2711,7 +2808,8 @@ function loop(ts){
       g.restore(); continue;
     }
     g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7);
-    g.fillStyle= b.nh? 'rgba(214,178,255,'+(0.8*b.life)+')'
+    g.fillStyle= b.nh2? 'rgba(255,160,200,'+(0.85*b.life)+')'
+               : b.nh? 'rgba(214,178,255,'+(0.8*b.life)+')'
                : b.white? 'rgba(235,255,246,'+(0.8*b.life)+')' : 'rgba(160,245,200,'+(0.7*b.life)+')';
     g.fill(); }
   bits=bits.filter(b=>b.life>0);
@@ -2748,23 +2846,38 @@ function loop(ts){
   for(const s of shards){ s.life-=dt*(s.div?2.0:2.6);
     if(s.life<=0) continue;
     if(s.div){
-      // ★分裂した瞬間の輪。「いつ増えたか」が全く見えないという指摘への答え。
-      //   二重の輪＋分かれた向きへ伸びる短い光条で「割れた」を示す
-      const t=1-s.life, R=t*30+4;
+      // ★分裂した瞬間。音は使わず見た目だけで知らせるので、思い切り強く出す：
+      //   白い芯の閃光 → 太い輪が広がる → 割れた向きへ光条が伸びる → 内側に薄い膜
+      const t=1-s.life, R=t*44+5;
       const col= s.good? '190,255,225' : '255,170,205';
-      g.beginPath(); g.arc(s.x,s.y,R,0,7);
-      g.strokeStyle='rgba('+col+','+(0.85*s.life*s.life)+')'; g.lineWidth=1.2+2.6*s.life; g.stroke();
-      g.beginPath(); g.arc(s.x,s.y,R*0.55,0,7);
-      g.strokeStyle='rgba('+col+','+(0.45*s.life)+')'; g.lineWidth=1+1.6*s.life; g.stroke();
-      if(s.ang!=null){
-        const L=6+16*t;
-        g.beginPath();
-        g.moveTo(s.x+Math.cos(s.ang)*L*0.4, s.y+Math.sin(s.ang)*L*0.4);
-        g.lineTo(s.x+Math.cos(s.ang)*L,     s.y+Math.sin(s.ang)*L);
-        g.moveTo(s.x-Math.cos(s.ang)*L*0.4, s.y-Math.sin(s.ang)*L*0.4);
-        g.lineTo(s.x-Math.cos(s.ang)*L,     s.y-Math.sin(s.ang)*L);
-        g.strokeStyle='rgba('+col+','+(0.7*s.life)+')'; g.lineWidth=1.6*s.life+0.6; g.stroke();
+      const glow= s.good? 'rgba(150,255,215,' : 'rgba(255,150,200,';
+      g.save();
+      // 割れた瞬間の白い閃光（最初の0.1秒だけ）
+      if(s.life>0.72){
+        const u=(s.life-0.72)/0.28;
+        const fr=g.createRadialGradient(s.x,s.y,0,s.x,s.y,26);
+        fr.addColorStop(0,'rgba(255,255,255,'+(0.85*u)+')');
+        fr.addColorStop(0.5,glow+(0.45*u)+')');
+        fr.addColorStop(1,glow+'0)');
+        g.fillStyle=fr; g.beginPath(); g.arc(s.x,s.y,26,0,7); g.fill();
       }
+      g.shadowColor=glow+(0.9*s.life)+')'; g.shadowBlur=12*s.life;
+      g.beginPath(); g.arc(s.x,s.y,R,0,7);
+      g.strokeStyle='rgba('+col+','+(0.95*s.life*s.life)+')'; g.lineWidth=1.6+4.2*s.life; g.stroke();
+      g.shadowBlur=0;
+      g.beginPath(); g.arc(s.x,s.y,R*0.52,0,7);
+      g.strokeStyle='rgba(255,255,255,'+(0.5*s.life*s.life)+')'; g.lineWidth=1+2.2*s.life; g.stroke();
+      if(s.ang!=null){
+        const L=8+26*t;                                  // 割れた向き＝2つになった向き
+        g.lineCap='round';
+        g.beginPath();
+        g.moveTo(s.x+Math.cos(s.ang)*L*0.35, s.y+Math.sin(s.ang)*L*0.35);
+        g.lineTo(s.x+Math.cos(s.ang)*L,      s.y+Math.sin(s.ang)*L);
+        g.moveTo(s.x-Math.cos(s.ang)*L*0.35, s.y-Math.sin(s.ang)*L*0.35);
+        g.lineTo(s.x-Math.cos(s.ang)*L,      s.y-Math.sin(s.ang)*L);
+        g.strokeStyle='rgba('+col+','+(0.85*s.life)+')'; g.lineWidth=2.6*s.life+0.8; g.stroke();
+      }
+      g.restore();
       continue;
     }
     g.beginPath(); g.arc(s.x,s.y,(1-s.life)*(s.small?16:70)+(s.small?3:8),0,7);
@@ -2922,39 +3035,9 @@ function loop(ts){
   }
   if(dragging){ g.beginPath(); g.arc(head.x,head.y,7,0,7);
     g.fillStyle='rgba(200,255,230,.9)'; g.shadowColor='#8ff0c0'; g.shadowBlur=16; g.fill(); g.shadowBlur=0;
-    // ★今の鎖本数＝一度に溶かせる匹数。閉じる前に足りるか判断させる
-    // 鎖に埋もれないよう、暗いバッジを敷いて指先の上に浮かせる
-    // ★指は物理的に8〜10mm＝55〜64px を覆う。30pxでは指の下に隠れるので離す。
-    //   画面上端に近い時は指の下側に回す
+    // ★指先のバッジ（鎖の本数）は廃止した。先頭は指の真下＝指で隠れて見えないため、
+    //   そこに情報を置いても読めない。鎖の本数はHUDの「鎖」に出す（updateChain）
     ammoFlash=Math.max(0, ammoFlash-dt*2.6);
-    const br=17*(1+0.30*ammoFlash);
-    const bx=Math.max(viewX()+br/zoom+4, Math.min(viewX()+viewW()-br/zoom-4, head.x));
-    const by=(head.y-56 < viewY()+(br+50)/zoom)? head.y+56 : head.y-56;
-    g.save();
-    g.beginPath(); g.arc(bx,by,br,0,7);
-    g.fillStyle='rgba(6,14,12,.82)'; g.fill();
-    g.strokeStyle= joinedCount? 'rgba(140,250,200,.95)' : 'rgba(255,140,110,.95)';
-    g.lineWidth=2; g.stroke();
-    // ★オーラで燃えている間の「燃焼計」＝一周したら1匹消える。
-    //   走っているだけで弾薬が減っていることが、減る前から見える
-    if(aura>0.35 && joinedCount>0){
-      g.beginPath(); g.arc(bx,by,br+5,0,7);                       // 溝（残りが見えるように）
-      g.strokeStyle='rgba(20,60,80,.85)'; g.lineWidth=4.5; g.stroke();
-      g.beginPath(); g.arc(bx,by,br+5,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,auraAcc));
-      g.strokeStyle='rgba(140,235,255,.98)'; g.lineWidth=4; g.lineCap='round';
-      g.shadowColor='rgba(120,225,255,.9)'; g.shadowBlur=8; g.stroke(); g.shadowBlur=0;
-    }
-    // 減った瞬間＝弾ける輪と数字の色替え（自分の残弾が動いた事に気づける）
-    if(ammoFlash>0){
-      g.beginPath(); g.arc(bx,by,br+6+22*(1-ammoFlash),0,7);
-      g.strokeStyle='rgba(150,235,255,'+(0.8*ammoFlash*ammoFlash)+')';
-      g.lineWidth=1+3*ammoFlash; g.stroke();
-    }
-    g.font='800 '+(18*(1+0.22*ammoFlash)).toFixed(1)+'px system-ui,-apple-system,sans-serif';
-    g.textAlign='center'; g.textBaseline='middle';
-    g.fillStyle= ammoFlash>0.35? '#d8f4ff' : (joinedCount? '#a6ffd4' : '#ff9a80');
-    g.fillText(joinedCount, bx, by+1);
-    g.restore(); g.shadowBlur=0;
   }
 
   g.restore(); // 世界座標ここまで＋画面揺れ
