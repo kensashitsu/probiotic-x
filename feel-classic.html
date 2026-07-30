@@ -275,7 +275,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v115 (07-30 17:38)';
+const BUILD='v116 (07-31 06:30)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -504,7 +504,12 @@ const REF_AREA=390*604;
 //   1匹倒すごとに約1%動くのが目で見える。数の生き残り勝負として一番分かりやすい。
 //   画面が変わっても密度が保たれるよう面積比で決める（?n=100 で絶対数を指定できる）
 const N_ABS=+(_q.get('n')||0);
-const N_REF=+(_q.get('nref')||16);
+// ★v116：密度を上げた（16→22＝約1.4倍）。「囲んで溶かす」機会を増やすため。
+//   勝敗はゲージ＝頭数の【比】なので、両陣営を同じだけ増やしてもバランスは動かない。
+//   増殖率も1匹あたりで定義してあるので、密度に対して中立。
+//   ただし【頭数そのもので判断している定数】だけは density に比例させる必要がある
+//   （奪いの下限・少数時の増殖補正の2つ。下の ALLY_FLOOR / LOW_N を参照）
+const N_REF=+(_q.get('nref')||22);
 const CAP_K=+(_q.get('cap')||9.0);   // 食品に入りきる総数＝開始数の何倍か
 // 敵の密度。狭い画面で通り道が無くなるのが避けられなさの主因なので既定を下げる
 const FOES_REF=+(new URLSearchParams(location.search).get('foes')||10);
@@ -890,7 +895,10 @@ const GF=+(_q.get('gf')||_D.gf);   // 腐敗菌1匹あたりの分裂速度（/�
 const GA=+(_q.get('ga')||_D.ga);   // 乳酸菌1匹あたりの分裂速度（/秒）
 const STEAL_N=+(_q.get('steal')||1);   // 腐敗菌1回の分裂で奪う乳酸菌の数
 const STEAL_P=+(_q.get('stealp')||0.35);   // 奪いが起きる確率
-const ALLY_FLOOR=+(_q.get('floor')||45);   // これ以下なら奪わない（弾薬が枯れて詰むのを防ぐ）
+// ★頭数そのもので判断する値は、密度（開始数）に比例させる。
+//   絶対値で置くと、密度を変えた瞬間に意味が変わってしまう（45匹＝開始の45%のつもりだった）
+const ALLY_FLOOR_K=+(_q.get('floor')||0.45);   // 開始数のこの割合以下なら奪わない
+function allyFloor(){ return startCount()*ALLY_FLOOR_K; }
 const STEAL_R=150;
 // ★桿菌の太さは5.3pxしかないので、くびれの"形"は物理的に見えない。
 //   ゆっくりにして、光と動き（伸びる→割れて飛び退く）で見せる
@@ -913,10 +921,11 @@ function foeSuppress(){ return 0.6+0.8*(1-gauge); }
 //   ただし単純な下限を入れると【放置でも50%で釣り合ってしまう】（実測）ので、
 //   効かせるのは「乳酸菌の頭数が少ない時」だけにする＝空いた場所が多いほどよく増える、
 //   という現象そのもの。放置は菌数が減らないので恩恵ゼロ＝そのまま腐る
-const LOW_N=+(_q.get('lown')||70);      // これ以下から「空きが多い」ぶんの補正が効く
+const LOW_K=+(_q.get('lown')||0.7);     // 開始数のこの割合を下回ると補正が効き始める
+function lowN(){ return startCount()*LOW_K; }
 const LOW_BOOST=+(_q.get('lowb')||1.0);
 function allyBoost(){
-  const low=Math.max(0, 1-livingRods()/LOW_N);
+  const low=Math.max(0, 1-livingRods()/lowN());
   return gauge + LOW_BOOST*low*low;     // 少ないほど強く効く（二次）
 }
 function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n; }
@@ -954,6 +963,7 @@ let rods=[];   // {x,y,ang,joined,order,phase}
 let foes=[];   // {x,y,r,phase,dead,dt(死にアニメ),spikes[]}
 let bits=[];   // 溶けカス粒子
 let seals=[];  // 封印フラッシュ {poly,life}
+let rings=[];  // 中和の輪 {x,y,r0,r1,life,clear}（靄が縮んだ幅をそのまま見せる）
 let shards=[]; // シャッターの破片フラッシュ
 // ★8の字などで続けて溶かした時のコンボ。2回目以降は鎖を消費しない＝腕前がそのまま得になる。
 //   時間だけで判定するので、一筆でも別のなぞりでも続けられる
@@ -976,7 +986,7 @@ function scatter(){
   }
   foes=[]; const F=foeCount(); for(let i=0;i<F;i++) spawnFoe();
   makeStartChains();          // ★最初から連なっているものを混ぜる
-  bits=[]; seals=[]; shards=[]; pops=[]; combo=0; comboT=-9; totalSealed=0; hitCd=0; shake=0;
+  bits=[]; seals=[]; shards=[]; pops=[]; rings=[]; combo=0; comboT=-9; totalSealed=0; hitCd=0; shake=0;
   // ★盤面は画面より広いので、原点(0,0)のままだと必ず左上から始まってしまう。
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
@@ -1374,12 +1384,27 @@ function doSeal(poly){
     let hit=pointInPoly(a.x,a.y,poly);
     if(!hit){ for(const q of poly){ if(Math.hypot(q.x-a.x,q.y-a.y)<a.r){ hit=true; break; } } }
     if(!hit) continue;
-    a.max=(a.max||AM_R) - (AM_CUT0+AM_CUT1*joinedCount)*SCALE;
+    const before=(a.max||AM_R);
+    a.max=before - (AM_CUT0+AM_CUT1*joinedCount)*SCALE;
     a.cut=1;                      // pHメーターの針が動いた合図
     shrunk++;
-    for(let i=0;i<10;i++) bits.push({x:a.x+rnd(-1,1)*a.r*0.6, y:a.y+rnd(-1,1)*a.r*0.6,
-      vx:rnd(-1.2,1.2), vy:rnd(-1.6,0.3), life:.9, r:rnd(1.2,2.8)});
+    // ★中和は「効いている」ことが一番伝わるべき瞬間。粒だけでは地味だったので、
+    //   紫→ミントに変わりながら外へ吹き飛ぶ粒＋収縮する二重の輪＋画面の揺れで出す
+    for(let i=0;i<18;i++){
+      const ang=rnd(0,6.283), sp=rnd(1.4,4.2);
+      bits.push({x:a.x+Math.cos(ang)*a.r*rnd(0.2,0.9), y:a.y+Math.sin(ang)*a.r*rnd(0.2,0.9),
+        vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp-0.5, life:1.0, r:rnd(1.2,3.0), neu:1});
+    }
+    rings.push({x:a.x, y:a.y, r0:before, r1:a.max, life:1});
+    shake=Math.max(shake, 3);
+    if(a.max<AM_R*0.22){            // これで晴れる＝一番大きな成果
+      rings.push({x:a.x, y:a.y, r0:before*1.15, r1:0, life:1, clear:true});
+      bits.push({x:a.x, y:a.y-16, vx:0, vy:-0.6, life:1.5, r:1, txt:'晴れた！', col:'mint'});
+      shake=Math.max(shake, 7);
+      clearSnd();
+    }
   }
+  if(shrunk>0) neutralSnd(shrunk, joinedCount);
   // 靄に守られている敵はまだ溶けない（靄を削り切ってから）
   // ★「一度囲っただけでは溶けない」理由が見えていなかったので、
   //   守った膜を敵ごとに出し、守った靄の側も光らせる＝原因と結果が同時に見える
@@ -1392,7 +1417,7 @@ function doSeal(poly){
   if(hazed.length && inView(hazed[0].x,hazed[0].y,30))
     bits.push({x:hazed[0].x, y:hazed[0].y-14, vx:0, vy:-0.45, life:1.35, r:1, txt:'中和', col:'nh3', sm:1});
   if(shrunk>0){
-    fizz(0, joinedCount);
+    // 中和の音は neutralSnd に一本化（弱い fizz と重ねると濁って何も聞こえない）
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
   }
   // ★コンボ：演出だけ（弾薬の免除は廃止。無料が挟まると弾薬が減らず一方的になる）
@@ -1898,7 +1923,7 @@ function startChime(){
 }
 // 鳴らしすぎ防止（実機で重くならないよう、音ごとに最短間隔を設ける）
 const SND_GAP={pop:60, fizz:110, crack:90, brk:150, burst:150, div:260, bump:260,
-               auraOn:200, auraOff:200, resist:200, fdiv:340, guard:220, steal:420};
+               auraOn:200, auraOff:200, resist:200, fdiv:340, guard:220, steal:420, neu:140};
 const _lastKey={};
 function sndOK(key){
   if(muted) return false;
@@ -2021,6 +2046,45 @@ function foeDivSnd(){ if(!A||!sndOK('fdiv'))return; try{
   gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.020,t+0.008);
   gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
   o.connect(lp).connect(gg).connect(A.destination); o.start(t); o.stop(t+dur+0.02);
+}catch(e){} }
+// ★アンモニアを中和した音。「効いている」ことが一番伝わるべき瞬間なので、
+//   泡が潰れるシューッ（高い方から低い方へ落ちる帯域ノイズ）＋酸が勝つ和音を重ねる。
+//   溶かした時の fizz とは向き（周波数の動き）を逆にして、耳でも別物にする
+function neutralSnd(n,strong){ if(!A||!sndOK('neu'))return; try{
+  const t=A.currentTime, dur=0.42+Math.min(n,4)*0.04;
+  const buf=A.createBuffer(1,Math.ceil(A.sampleRate*dur),A.sampleRate);
+  const ch=buf.getChannelData(0);
+  for(let i=0;i<ch.length;i++){ const e=1-i/ch.length; ch[i]=(Math.random()*2-1)*e; }
+  const src=A.createBufferSource(); src.buffer=buf;
+  const bp=A.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=1.6;
+  bp.frequency.setValueAtTime(2600,t); bp.frequency.exponentialRampToValueAtTime(420,t+dur);
+  const gg=A.createGain();
+  gg.gain.setValueAtTime(0.0001,t); gg.gain.exponentialRampToValueAtTime(0.26,t+0.03);
+  gg.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(bp).connect(gg).connect(A.destination); src.start(t); src.stop(t+dur);
+  // 酸が押し返す2音（上がる＝pHが下がった＝こちらの勝ち）
+  const base=430+Math.min(strong,30)*8;
+  [0,7].forEach((iv,k)=>{
+    const o=A.createOscillator(), og=A.createGain();
+    o.type='triangle'; o.frequency.value=base*Math.pow(2,iv/12);
+    og.gain.setValueAtTime(0.0001,t+k*0.07);
+    og.gain.exponentialRampToValueAtTime(0.11,t+0.03+k*0.07);
+    og.gain.exponentialRampToValueAtTime(0.0001,t+0.34+k*0.07);
+    o.connect(og).connect(A.destination); o.start(t+k*0.07); o.stop(t+0.38+k*0.07);
+  });
+}catch(e){} }
+// 靄を削り切って晴れた瞬間＝一番大きな成果なので、上がる3音で締める
+function clearSnd(){ if(!A||muted)return; try{
+  const t=A.currentTime;
+  [0,4,7,12].forEach((iv,k)=>{
+    const o=A.createOscillator(), og=A.createGain();
+    o.type='triangle'; o.frequency.value=560*Math.pow(2,iv/12);
+    og.gain.setValueAtTime(0.0001,t+k*0.06);
+    og.gain.exponentialRampToValueAtTime(0.13,t+0.02+k*0.06);
+    og.gain.exponentialRampToValueAtTime(0.0001,t+0.40+k*0.06);
+    o.connect(og).connect(A.destination); o.start(t+k*0.06); o.stop(t+0.44+k*0.06);
+  });
+  sndPlays++;
 }catch(e){} }
 // 乳酸菌が奪われた音。目で追えない所で減るのが分からない、という指摘への保険。
 // 小さく短く（気付ける最小限）。分裂音のように連発しないよう間隔も長め
@@ -2492,7 +2556,7 @@ function loop(ts){
         divFx((f.x+nf.x)/2, (f.y+nf.y)/2, a, false);   // 音は付けない（見た目だけで知らせる）
         // ★奪いは効きすぎる（分裂1回＝1匹だと、敵200匹で毎秒5匹取られて弾薬が枯れる）。
         //   確率にし、さらに下限を割ったら奪わない＝拾う相手が居なくなる状況を作らない
-        if(livingRods()>ALLY_FLOOR && Math.random()<STEAL_P)
+        if(livingRods()>allyFloor() && Math.random()<STEAL_P)
           for(let k=0;k<STEAL_N;k++) killAllyNear(nf.x,nf.y,STEAL_R);   // 居場所と栄養を奪う
       }
     }
@@ -2821,6 +2885,28 @@ function loop(ts){
       g.strokeStyle='rgba(214,180,255,'+(0.55*u)+')'; g.lineWidth=1.5+2.5*u; g.stroke();
     }
   }
+  // ★中和の輪。靄が「どこからどこまで縮んだか」をそのまま輪で見せる＝効いたのが一目で分かる
+  for(let i=rings.length-1;i>=0;i--){
+    const R=rings[i];
+    R.life-=dt*(R.clear? 1.6:2.4);
+    if(R.life<=0){ rings.splice(i,1); continue; }
+    const u=1-R.life;                                  // 0→1
+    const rr=R.r0+(R.r1-R.r0)*Math.min(1,u*1.25);      // 外から内へ締まる
+    g.save();
+    g.beginPath(); g.arc(R.x,R.y,Math.max(0,rr),0,7);
+    // 紫（アルカリ）からミント（酸）へ色が変わる＝中和そのもの
+    const cr=Math.round(190-70*u), cg=Math.round(150+95*u), cb=Math.round(255-45*u);
+    g.strokeStyle='rgba('+cr+','+cg+','+cb+','+(0.9*R.life)+')';
+    g.lineWidth=(R.clear? 5:3)*R.life+1;
+    g.shadowColor='rgba(150,255,210,'+(0.8*R.life)+')'; g.shadowBlur=12*R.life;
+    g.stroke();
+    if(R.clear){                                       // 晴れた時は外へ広がる輪も足す
+      g.beginPath(); g.arc(R.x,R.y,R.r0*(1+0.9*u),0,7);
+      g.strokeStyle='rgba(180,255,220,'+(0.6*R.life*R.life)+')';
+      g.lineWidth=2+4*R.life; g.stroke();
+    }
+    g.restore();
+  }
   // ★腐敗菌が乳酸菌を奪う瞬間。まっすぐな線＝ビームは知育らしくなかったので、
   //   実際に起きていること＝「タンパク分解酵素を吹きかけて溶かし、栄養を吸い上げる」
   //   を粒の流れで描く。線は1本も引かない（?atk=beam で従来の線に戻せる）
@@ -2974,7 +3060,10 @@ function loop(ts){
       g.restore(); continue;
     }
     g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7);
-    g.fillStyle= b.nh2? 'rgba(255,160,200,'+(0.85*b.life)+')'
+    // 中和の粒＝紫（アルカリ）からミント（酸）へ変わりながら飛ぶ
+    g.fillStyle= b.neu? ('rgba('+Math.round(200-80*(1-b.life))+','+Math.round(150+100*(1-b.life))
+                          +','+Math.round(250-40*(1-b.life))+','+(0.9*b.life)+')')
+               : b.nh2? 'rgba(255,160,200,'+(0.85*b.life)+')'
                : b.nh? 'rgba(214,178,255,'+(0.8*b.life)+')'
                : b.white? 'rgba(235,255,246,'+(0.8*b.life)+')' : 'rgba(160,245,200,'+(0.7*b.life)+')';
     g.fill(); }
