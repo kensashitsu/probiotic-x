@@ -256,7 +256,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v105 (07-30 11:52)';
+const BUILD='v106 (07-30 12:07)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -451,7 +451,7 @@ const PARK_TOUCH=+(_q.get('parkt')||1.40);
 const PARK_FADE=+(_q.get('parkf')||0.60);
 const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めている」
 let parkT=0, camW=1, isMouse=false;
-const AURA_BURN=+(_q.get('burn')||1.1);   // オーラ中に毎秒失う桿菌の数
+const AURA_BURN=+(_q.get('burn')||0.8);   // オーラ中に毎秒失う桿菌の数
 let auraAcc=0;
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
@@ -777,7 +777,7 @@ const AM_CUT1=+(_q.get('cut1')||0.55);  // 桿菌1匹あたり追加で削れる
 //   「まとめて大きく囲うほど得」が効き、鎖の長さ＝封印できる回数になる
 // ★囲んだ面積あたりの代金。半径45pxの小さな輪なら1匹、150pxの大きな輪なら10匹。
 //   面積は靴ひも公式で出す（多角形なのでそのまま計算できる）
-const AREA_PER=+(_q.get('area')||7000);   // 桿菌1匹で塗れる面積(px^2)
+const AREA_PER=+(_q.get('area')||9000);   // 桿菌1匹で塗れる面積(px^2)
 function polyArea(poly){
   let a=0;
   for(let i=0,n=poly.length;i<n;i++){ const p1=poly[i], p2=poly[(i+1)%n];
@@ -843,11 +843,13 @@ const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
 //   実機で詰められるよう ?diff=easy|normal|hard を用意した（覚えるのが2つだと面倒なので）
 const DIFF=(function(){ const v=(_q.get('diff')||'').toLowerCase();
   return (v==='easy'||v==='normal'||v==='hard'||v==='ultra')? v : 'normal'; })();
-const _D={easy:{gf:0.020, ga:0.046}, normal:{gf:0.026, ga:0.038},
-          hard:{gf:0.032, ga:0.032}, ultra:{gf:0.040, ga:0.028}}[DIFF]||{gf:0.026,ga:0.038};
+const _D={easy:{gf:0.018, ga:0.052}, normal:{gf:0.022, ga:0.046},
+          hard:{gf:0.028, ga:0.040}, ultra:{gf:0.036, ga:0.034}}[DIFF]||{gf:0.022,ga:0.046};
 const GF=+(_q.get('gf')||_D.gf);   // 腐敗菌1匹あたりの分裂速度（/秒）
 const GA=+(_q.get('ga')||_D.ga);   // 乳酸菌1匹あたりの分裂速度（/秒）
 const STEAL_N=+(_q.get('steal')||1);   // 腐敗菌1回の分裂で奪う乳酸菌の数
+const STEAL_P=+(_q.get('stealp')||0.35);   // 奪いが起きる確率
+const ALLY_FLOOR=+(_q.get('floor')||45);   // これ以下なら奪わない（弾薬が枯れて詰むのを防ぐ）
 const STEAL_R=150;
 // ★桿菌の太さは5.3pxしかないので、くびれの"形"は物理的に見えない。
 //   ゆっくりにして、光と動き（伸びる→割れて飛び退く）で見せる
@@ -2124,7 +2126,10 @@ function loop(ts){
           nf.link=f; f.next=nf; nf.clen=(f.clen||0)+1;
         }else{ nf.link=null; nf.next=null; nf.clen=0; }
         f.x-=Math.cos(a)*d; f.y-=Math.sin(a)*d;
-        for(let k=0;k<STEAL_N;k++) killAllyNear(nf.x,nf.y,STEAL_R);   // 居場所と栄養を奪う
+        // ★奪いは効きすぎる（分裂1回＝1匹だと、敵200匹で毎秒5匹取られて弾薬が枯れる）。
+        //   確率にし、さらに下限を割ったら奪わない＝拾う相手が居なくなる状況を作らない
+        if(livingRods()>ALLY_FLOOR && Math.random()<STEAL_P)
+          for(let k=0;k<STEAL_N;k++) killAllyNear(nf.x,nf.y,STEAL_R);   // 居場所と栄養を奪う
       }
     }
 
