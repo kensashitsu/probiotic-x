@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="ぬか床を守れ">
 <meta name="theme-color" content="#0b0f14">
 <link rel="manifest" href="manifest.json">
-<title>ズタッと囲う（原点版）</title>
+<title>ぬか床を漬ける（pH版）</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
@@ -36,6 +36,14 @@
   #pcL{left:0;justify-content:flex-end;padding-right:6px;color:#08281e}
   #pcR{right:0;justify-content:flex-start;padding-left:6px;color:#ffe0d2}
   #bar .cr{right:9px;color:#ffd8c8}
+  /* 目標pHの位置に線を出す＝どこまで下げれば漬かるかが見える */
+  #barGoal{position:absolute;top:-3px;bottom:-3px;width:2px;background:rgba(255,255,255,.75);
+    box-shadow:0 0 6px rgba(255,255,255,.7)}
+  #phNum{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;
+    justify-content:center;font-size:12px;font-weight:800;letter-spacing:.04em;
+    font-variant-numeric:tabular-nums;color:#eafcff;z-index:3}
+  /* 境目や目標線が数字に重なって読めなくなるので、暗い座を敷く */
+  #phNum span{background:rgba(6,14,12,.62);border-radius:9px;padding:1px 8px 2px}
   #nums{display:flex;align-items:center;gap:9px;margin-top:5px;font-size:11px;color:#7f8f95;
     font-variant-numeric:tabular-nums}
   #nums b{color:#bfe9d2;font-weight:800;font-size:12.5px}
@@ -143,24 +151,26 @@
   <div id="bar">
     <div id="barL"></div>
     <div id="barMid"></div>
-    <div class="cap cl">乳酸</div><div class="cap cr">腐敗</div>
-    <div id="pcL">50%</div><div id="pcR">50%</div>
+    <div id="barGoal"></div>
+    <div class="cap cl">酸性</div><div class="cap cr">アルカリ</div>
+    <div id="phNum"><span>pH 6.00</span></div>
   </div>
   <div id="nums">
     <span class="foodname" id="foodname">ぬか床</span>
     <span class="tm">残り <b id="tleft">90</b></span>
-    <span class="s1">乳酸菌 <b id="nAlly">0</b></span>
+    <span class="s1">酸性 <b id="acidPc">0%</b></span>
     <span class="s2">腐敗菌 <b id="nFoe">0</b></span>
-    <span class="s3">溶かした <b id="cnt">0</b></span>
+    <span class="s3">酸の在庫 <b id="nAlly">0</b><span id="cnt" style="display:none">0</span></span>
     <button id="sndbtn" title="テスト音">🔊</button>
     <button id="reset">やり直す</button>
   </div>
 </div>
-<div id="tip">なぞって乳酸菌を繋ぐほど酸の帯が伸び、大きく囲める ─ 囲えば溶ける／触れれば弾ける</div>
+<div id="tip">囲った場所が酸性になる ─ 広く塗るほど乳酸菌を使う／腐敗菌はアルカリで塗り返す</div>
 <div id="ready">
-  <div class="rt">ぬか床を守れ</div>
-  <div class="rs">なぞって<b>乳酸菌（白い桿菌）</b>を繋ぎ、<b>腐敗菌（ピンクの球菌）</b>を輪で囲んで溶かす。<br>
-  90秒後に<b>数の多い方が勝ち</b>。触れると鎖は弾け、速く走ると<b>酸のオーラ</b>を纏う。</div>
+  <div class="rt">ぬか床を漬ける</div>
+  <div class="rs">なぞって<b>乳酸菌（白い桿菌）</b>を繋ぎ、輪で<b>囲った場所が酸性</b >になる。<br>
+  90秒で<b>pHをどこまで下げられるか</b>。<b>腐敗菌</b>はアルカリで塗り返してくるので、囲んで溶かす。<br>
+  乳酸菌は<b>塗るための酸＝弾薬</b>で、広く塗るほど多く使う。</div>
   <button id="go">タップして開始</button>
   <div class="rn">※ブラウザの仕様で、音は最初のタップから鳴り始めます。右上の <b>🔊</b> でオン/オフできます</div>
   <div class="rn" id="a2hs">※<b style="color:#8ff0c0">共有 → ホーム画面に追加</b>してから起動すると、
@@ -191,7 +201,7 @@ const cv=document.getElementById('cv'), g=cv.getContext('2d');
 const elCnt=document.getElementById('cnt');
 const elAlly=document.getElementById('nAlly'), elFoe=document.getElementById('nFoe');
 const elBarL=document.getElementById('barL'), elBarMid=document.getElementById('barMid');
-const elPcL=document.getElementById('pcL'), elPcR=document.getElementById('pcR');
+const elPh=document.getElementById('phNum'), elGoal=document.getElementById('barGoal'), elAcid=document.getElementById('acidPc');
 const elTime=document.getElementById('tleft');
 const elOver=document.getElementById('over'), elOverT=document.getElementById('overTtl'),
       elOverS=document.getElementById('overSub');
@@ -273,6 +283,7 @@ function resize(){
   //   これが無いと、縦で読み込んでから横にした時に菌が前の広さのまま左に固まり、
   //   右の44%が丸ごと空になる（実機で発覚）。アドレスバーの出入りでも同じことが起きる
   try{ remapWorld(); }catch(e){}
+  try{ if(!grid || gw!==Math.ceil(worldW()/CELL)) gridInit(); }catch(e){}
   // iOSはURLバーの出入りで高さが変わる。世界の外にカメラが残らないよう挟み直す
   try{ clampCam(); }catch(e){}
 }
@@ -372,7 +383,7 @@ const PARK_V=+(_q.get('parkv')||110);      // これ以下なら「止めてい�
 let parkT=0, camW=1, isMouse=false;
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
 const SOS_V=+(_q.get('sosv')||26);        // 仲間を探して寄っていく速さ(px/秒)
-let comboSeen=false;
+let comboSeen=false, noAmmoSeen=false, shortSeen=false, phBest=6.0;
 let aura=0, auraTail=0, saveSeen=false, guardOn=false, auraFlash=0, headSpd=0, turnR=9999, auraPF={x:0,y:0}, sosKilled=0, burstSeen=false, noCatchSeen=false;
 function auraR(){ return (AURA_R0+AURA_PER*joinedCount)*SCALE; }
 const FOE_K=+(_q.get('foer')||1.15);          // 桿菌の太さに対する球菌の直径の倍率
@@ -402,11 +413,73 @@ let PLAY_TOP=110, BOT_PAD=120;
 function playBot(){ return H-BOT_PAD; }
 // ★盤面を画面より広くして、鎖の先頭をカメラが追う。
 //   PC版の「広い画面で走り回れる」自由度は、画面内の縮尺だけでは戻らない
-const WORLD=Math.max(1, Math.min(6, +(_q.get('world')||3)));   // 疾走するマップなので広く
+const WORLD=Math.max(1, Math.min(6, +(_q.get('world')||1.6)));  // ★pH版：塗り切れる広さにする
 function worldW(){ return W*WORLD; }
 function worldBot(){ return PLAY_TOP + (playBot()-PLAY_TOP)*WORLD; }
 function playArea(){ return worldW()*Math.max(120, worldBot()-PLAY_TOP); }
 let cam={x:0,y:0};
+// ============================================================
+//  ★pH版：囲った領域が酸性として残り、敵のアルカリで塗り返される。
+//    得点はpHだけ。菌は「資源」で、勝敗には数えない。
+//    面積は粗い格子で持つ（1セル=CELL px）。塗った時に差分で合計を更新するので、
+//    毎フレーム全セルを数える必要が無い
+// ============================================================
+const CELL=+(_q.get('cell')||24);
+const ALK_EVERY=0.25;                      // 塗り返しの計算間隔(秒)
+// ★塗り返しは「アンモニアの靄」だけにする。腐敗菌そのものが塗り返すと、
+//   プレイヤーは何と戦えばいいのか分からず、調整の当たりも掴めない。
+//   靄は見えて・囲めば削れる相手なので、因果がはっきりする（靄の発生源は腐敗菌なので数を減らす意味も残る）
+const ALK_FOE=+(_q.get('alkf')||0);        // 腐敗菌1匹が自分のセルを毎秒どれだけアルカリに戻すか
+const ALK_HAZE=+(_q.get('alkh')||0.10);    // アンモニアの靄の中の戻り方(毎秒)。靄は面積が広いので単価は低く
+let alkT=0;
+const PH_MID=+(_q.get('phmid')||6.0);     // 何も無い状態（新しいぬか床）
+const PH_K=+(_q.get('phk')||2.4);         // 全部酸性でpH-2.4（＝pH3.6）
+const PH_CURVE=+(_q.get('phcurve')||1.0); // 1で面積に比例。小さくすると最初の一塗りがよく効く
+const PH_GOAL=+(_q.get('phgoal')||5.2);   // ここまで下げたら「漬かった」（自動プレイが5.28なので人なら届く想定）
+let gw=0, gh=0, grid=null, gridSum=0;     // grid: -1(アルカリ)〜+1(酸性)
+function gridInit(){
+  gw=Math.max(1,Math.ceil(worldW()/CELL));
+  gh=Math.max(1,Math.ceil((worldBot()-PLAY_TOP)/CELL));
+  grid=new Float32Array(gw*gh); gridSum=0;
+}
+function gridCells(){ return gw*gh; }
+function cellAt(wx,wy){
+  const cx=Math.floor(wx/CELL), cy=Math.floor((wy-PLAY_TOP)/CELL);
+  if(cx<0||cy<0||cx>=gw||cy>=gh) return -1;
+  return cy*gw+cx;
+}
+// セルの値を動かして合計も更新する（合計は毎フレーム数えない）
+function cellAdd(i,v){
+  const before=grid[i];
+  let after=before+v; if(after>1)after=1; else if(after<-1)after=-1;
+  grid[i]=after; gridSum+=after-before;
+  return after-before;
+}
+// 塗り跡を描くための小さな画像（セル数ぶんだけ。拡大は canvas に任せる）
+let pcv=null, pctx=null, pimg=null;
+function drawPaint(){
+  if(!pcv || pcv.width!==gw || pcv.height!==gh){
+    pcv=document.createElement('canvas'); pcv.width=gw; pcv.height=gh;
+    pctx=pcv.getContext('2d'); pimg=pctx.createImageData(gw,gh);
+  }
+  const d=pimg.data;
+  for(let i=0,j=0;i<grid.length;i++,j+=4){
+    const v=grid[i];
+    if(v>0.02){      d[j]=90;  d[j+1]=240; d[j+2]=180; d[j+3]=(v*64)|0; }
+    else if(v<-0.02){ d[j]=190; d[j+1]=120; d[j+2]=225; d[j+3]=((-v)*56)|0; }
+    else { d[j+3]=0; }
+  }
+  pctx.putImageData(pimg,0,0);
+  g.save();
+  g.imageSmoothingEnabled=true;
+  g.drawImage(pcv, 0,0,gw,gh, 0,PLAY_TOP, gw*CELL, gh*CELL);
+  g.restore();
+}
+function phNow(){
+  const m=gridSum/Math.max(1,gridCells());
+  const sgn=m<0?-1:1;
+  return PH_MID - PH_K*sgn*Math.pow(Math.abs(m),PH_CURVE);
+}
 // ★「先が見えない」問題。先頭は必ず指の画面位置に居るので、走るために指を端へ押し出すと
 //   先頭も端に来てしまい、進行方向に残る余白は実測4px（画面の1%）＝ぶつかってから気づく。
 //   走っている間だけ視界を進行方向へずらして、先頭を画面の手前に引き戻す。
@@ -762,7 +835,9 @@ const WIN_AT=0.94, LOSE_AT=0.06;
 const TIME_LIMIT=+(_q.get('time')||90);
 // ★pHが増殖率に効く。酸性なほど腐敗菌は増えられず乳酸菌は増えやすい（実際の発酵）
 function foeSuppress(){ return 0.6+0.8*(1-gauge); }
-function allyBoost(){ return gauge; }
+// ★pH版：乳酸菌は酸性で元気に増える（実際そう）。弾薬の供給源なので、
+//   中性でも止まらない程度の下駄を履かせる
+function allyBoost(){ return 0.35+0.9*gauge; }
 function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n; }
 function livingFoes(){ let n=0; for(const f of foes) if(!f.dead) n++; return n; }
 const AM_RATE=+(_q.get('am')||0.35);   // 靄の発生（個/秒・腐敗菌が多いほど増える）
@@ -815,6 +890,7 @@ function scatter(){
   makeStartChains();          // ★最初から連なっているものを混ぜる
   bits=[]; seals=[]; shards=[]; pops=[]; combo=0; comboT=-9; totalSealed=0; hitCd=0; shake=0;
   cam={x:0,y:0}; lead={x:0,y:0}; clampCam();
+  gridInit(); phBest=PH_MID;
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
@@ -1030,6 +1106,44 @@ function catchNear(x,y){
   }
 }
 
+// ★囲った領域を酸性に塗る。塗れた（新しく酸性になった）セル数を返す。
+//   すでに酸性のところを塗り直しても弾薬は減らない＝無駄撃ちにならない
+const PAINT_STEP=+(_q.get('pstep')||1.0);   // 一度の封印でセルをどれだけ酸性に寄せるか
+const PAINT_COST=+(_q.get('pcost')||0.045); // 1セル塗るのに使う鎖の数
+function paintPoly(poly){
+  if(!grid||!poly||poly.length<3) return 0;
+  // 払える分しか塗れない（鎖0なら塗れない）
+  const budget=(joinedCount+payAcc)/PAINT_COST;
+  if(budget<=0.5) { if(!noAmmoSeen){ noAmmoSeen=true; tipMsg('酸が足りない ─ 乳酸菌を拾ってから囲め'); } return 0; }
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  for(const q of poly){ if(q.x<minx)minx=q.x; if(q.x>maxx)maxx=q.x;
+                        if(q.y<miny)miny=q.y; if(q.y>maxy)maxy=q.y; }
+  const x0=Math.max(0,Math.floor(minx/CELL)-1), x1=Math.min(gw-1,Math.floor(maxx/CELL)+1);
+  const y0=Math.max(0,Math.floor((miny-PLAY_TOP)/CELL)-1), y1=Math.min(gh-1,Math.floor((maxy-PLAY_TOP)/CELL)+1);
+  const SPILL=CELL*0.9;   // 輪の少し外までにじむ＝取りこぼしが無く、塗った感じが出る
+  let gained=0, short=false;
+  for(let cy=y0;cy<=y1;cy++) for(let cx=x0;cx<=x1;cx++){
+    if(gained>=budget){ short=true; break; }
+    const wx=cx*CELL+CELL/2, wy=PLAY_TOP+cy*CELL+CELL/2;
+    let inside=pointInPoly(wx,wy,poly);
+    if(!inside){ // 輪のすぐ外もにじませる
+      for(const q of poly){ if(Math.hypot(q.x-wx,q.y-wy)<SPILL){ inside=true; break; } }
+    }
+    if(!inside) continue;
+    const d=cellAdd(cy*gw+cx, PAINT_STEP);
+    if(d>0) gained+=d;               // 実際に酸性へ動いた分だけ数える
+  }
+  if(short && !shortSeen){ shortSeen=true; tipMsg('酸が足りず塗り切れない ─ 大きく囲うほど乳酸菌を使う'); }
+  return gained;
+}
+// 塗り代を払う。端数は溜めて、1匹分になったら実際に砕く
+let payAcc=0;
+function spendPaint(n){
+  if(n<=0) return;
+  payAcc+=n;
+  while(payAcc>=1 && joinedCount>0){ payAcc-=1; spendChain(1); }
+  if(joinedCount<=0) payAcc=0;
+}
 // --- 自己交差でループ検出 → 内側の腐敗菌を封じる ---
 function segInt(p1,p2,p3,p4){
   const d1x=p2.x-p1.x,d1y=p2.y-p1.y, d2x=p4.x-p3.x,d2y=p4.y-p3.y;
@@ -1125,14 +1239,17 @@ function doSeal(poly){
     fizz(0, joinedCount);
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
   }
-  // ★コンボ：続けて溶かせたら鎖を使わない（8の字で2つ続けて囲む、が報われる）
+  // ★★ pH版：囲った領域を酸性に塗る。塗れた面積に比例して鎖（弾薬）を使う ★★
+  const painted=paintPoly(poly);
+  // コンボ：続けて決めたら塗り代を割り引く（8の字で2つ続けて囲む、が報われる）
   let free=false;
-  if(sealed>0){
+  if(painted>0||sealed>0){
     combo = (clock-comboT<=COMBO_T)? combo+1 : 1;
     comboT=clock;
     free = COMBO_FREE && combo>=2;
   }
-  if((sealed>0||shrunk>0) && !free) spendChain(SEAL_COST);   // 溶かしても靄を削っても1回1匹
+  const cost = painted*PAINT_COST*(free? 0.5:1);
+  spendPaint(cost);
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
@@ -1157,44 +1274,44 @@ function doSeal(poly){
   if(resisted>0) resistSnd(resisted);
 }
 let lastPc=-1;
+// ★ゲージはpH。左に伸びるほど酸性＝漬かっている。目標pHの位置に線を出す
+const PH_WORST=+(_q.get('phworst')||7.2);   // 放置すると90秒で7.15まで上がる（実測）
+function ph2pc(ph){ return Math.max(0,Math.min(100, (PH_WORST-ph)/(PH_WORST-(PH_MID-PH_K))*100 )); }
 function updateBar(){
-  const p=(gauge*100);
+  const ph=phNow(), p=ph2pc(ph);
   elBarL.style.width=p.toFixed(1)+'%';
   elBarMid.style.left=p.toFixed(1)+'%';
-  // 境目の両脇に今の割合を出す。端に寄りすぎて数字が切れないよう内側で止める
-  const q=Math.round(p);
+  elGoal.style.left=ph2pc(PH_GOAL).toFixed(1)+'%';
+  const q=Math.round(ph*100);
   if(q!==lastPc){
     lastPc=q;
-    elPcL.textContent=q+'%'; elPcR.textContent=(100-q)+'%';
+    elPh.firstChild.textContent='pH '+ph.toFixed(2);
+    elPh.style.color = (ph<=PH_GOAL)? '#8ff0c0':'#eafcff';
+    const acid=Math.max(0,Math.round(gridSum/Math.max(1,gridCells())*100));
+    elAcid.textContent=acid+'%';
   }
-  const w=Math.max(17,Math.min(83,p));
-  elPcL.style.width=w.toFixed(1)+'%';
-  elPcR.style.left =w.toFixed(1)+'%';
-  // 片側が狭いと数字が相手の色の上に乗るので、文字色を入れ替えて読めるようにする
-  elPcL.style.color = (p<20)? '#f0fbf6' : '#08281e';
-  elPcR.style.color = (p>80)? '#0b2119' : '#ffe0d2';
 }
 function finishGame(win,how){
   phase= win? 'win':'lose';
   dragging=false; activeId=null;
   const pc=Math.round(gauge*100);
+  const phTxt='<span style="font-size:23px;color:#8ff0c0;font-weight:800">pH '+phBest.toFixed(2)+'</span>';
   elTime.textContent='0';
   if(win){
-    elOverT.textContent = how==='ko'? '完封！' : '漬かった！';
+    elOverT.textContent = how==='ko'? '漬かった！' : '漬かった！';
     elOverT.style.color='#8ff0c0';
-    elOverS.innerHTML='<span style="font-size:19px;color:#8ff0c0;font-weight:800">乳酸 '+pc+'%</span>'+
-      '<span style="color:#6f7d84"> : </span><span style="font-size:19px;color:#e78ab0;font-weight:800">腐敗 '+(100-pc)+'%</span><br>'+
-      '溶かした腐敗菌 <b style="color:#8ff0c0">'+totalSealed+'</b>'+
-      (how==='ko'? '（時間内に完全支配）':'')+'<br>'+
-      '<span style="color:#6f7d84">乳酸でpHが下がると、腐敗菌は増えられなくなります。</span>';
+    elOverS.innerHTML='いちばん下げたpH '+phTxt+'<br>'+
+      '酸性にした面積 <b style="color:#8ff0c0">'+Math.max(0,Math.round(gridSum/Math.max(1,gridCells())*100))+'%</b>'+
+      '　溶かした腐敗菌 <b style="color:#8ff0c0">'+totalSealed+'</b><br>'+
+      '<span style="color:#6f7d84">目標 pH '+PH_GOAL.toFixed(1)+' に到達＝ぬか床が漬かりました。</span>';
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
   }else{
-    elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
+    elOverT.textContent='漬かりきらなかった';
     elOverT.style.color='#ff9a80';
-    elOverS.innerHTML='<span style="font-size:19px;color:#8ff0c0;font-weight:800">乳酸 '+pc+'%</span>'+
-      '<span style="color:#6f7d84"> : </span><span style="font-size:19px;color:#e78ab0;font-weight:800">腐敗 '+(100-pc)+'%</span><br>'+
-      '溶かした腐敗菌 <b style="color:#ffb9a6">'+totalSealed+'</b><br>'+
-      '<span style="color:#6f7d84">腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</span>';
+    elOverS.innerHTML='いちばん下げたpH <span style="font-size:23px;color:#ffb9a6;font-weight:800">'+phBest.toFixed(2)+'</span><br>'+
+      '酸性にした面積 <b style="color:#ffb9a6">'+Math.max(0,Math.round(gridSum/Math.max(1,gridCells())*100))+'%</b>'+
+      '　溶かした腐敗菌 <b style="color:#ffb9a6">'+totalSealed+'</b><br>'+
+      '<span style="color:#6f7d84">目標は pH '+PH_GOAL.toFixed(1)+'。腐敗菌を減らすと塗り返されにくくなります。</span>';
   }
   elOver.classList.add('show');
 }
@@ -2054,17 +2171,16 @@ function loop(ts){
       }
     }
 
-    // ④ ゲージ＝そのまま頭数の比
-    const target=(nA+nF>0)? nA/(nA+nF) : 0.5;
-    gauge += (target-gauge)*Math.min(1, dt*GAUGE_SPD*6);
-    gauge=Math.max(0,Math.min(1,gauge));
+    // ④ ゲージ＝pH。菌数は勝敗に関係しない（資源）
+    const ph=phNow();
+    if(ph<phBest) phBest=ph;
+    gauge=ph2pc(ph)/100;          // 既存の演出（色など）が gauge を見るので合わせておく
     updateBar();
     const left=Math.max(0,TIME_LIMIT-playT);
     elTime.textContent=Math.ceil(left);
     elTime.style.color= left<=10? '#ff9a80' : '#bfe9d2';
-    if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
-    else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
-    else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
+    if(ph<=PH_GOAL) finishGame(true,'ko');
+    else if(playT>=TIME_LIMIT) finishGame(phBest<=PH_GOAL,'time');
     updateHud();
   }
 
@@ -2142,6 +2258,27 @@ function loop(ts){
       if(f.x<m){ f.x=m; f.wa=Math.PI-f.wa; } else if(f.x>wx-m){ f.x=wx-m; f.wa=Math.PI-f.wa; }
       if(f.y<PLAY_TOP+m){ f.y=PLAY_TOP+m; f.wa=-f.wa; } else if(f.y>yb-m){ f.y=yb-m; f.wa=-f.wa; }
     }
+    // ★腐敗菌はアンモニアを出してアルカリ性にする＝塗り返し。
+    //   1匹ずつは弱いが、放っておくと盤面が中性〜アルカリに戻っていく
+    alkT-=dt;
+    if(alkT<=0){
+      const step=ALK_EVERY; alkT=step;
+      for(const f of foes){
+        if(f.dead||f.sos!=null) continue;
+        const i=cellAt(f.x,f.y); if(i>=0) cellAdd(i, -ALK_FOE*step);
+      }
+      // 靄の中は強くアルカリに戻る
+      for(const a of ammo){
+        const r=a.r; if(r<=0) continue;
+        const x0=Math.max(0,Math.floor((a.x-r)/CELL)), x1=Math.min(gw-1,Math.floor((a.x+r)/CELL));
+        const y0=Math.max(0,Math.floor((a.y-r-PLAY_TOP)/CELL)), y1=Math.min(gh-1,Math.floor((a.y+r-PLAY_TOP)/CELL));
+        for(let cy=y0;cy<=y1;cy++) for(let cx=x0;cx<=x1;cx++){
+          const wx=cx*CELL+CELL/2, wy=PLAY_TOP+cy*CELL+CELL/2;
+          if(Math.hypot(wx-a.x,wy-a.y)>r) continue;
+          cellAdd(cy*gw+cx, -ALK_HAZE*step);
+        }
+      }
+    }
     // 保険：輪（サイクル）ができていないか定期的に点検して切る
     ringT-=dt;
     if(ringT<=0){ ringT=1.0; breakRings(foes); breakRings(rods); }
@@ -2202,6 +2339,9 @@ function loop(ts){
   g.setLineDash([10,10]); g.lineDashOffset=-clock*8;
   g.strokeRect(EDGE_M,PLAY_TOP+EDGE_M,worldW()-EDGE_M*2,worldBot()-PLAY_TOP-EDGE_M*2);
   g.restore();
+
+  // ★塗り跡。1セル=1pxの小さな画像に描いて拡大する＝格子の目が出ず、滲んだ染みに見える
+  if(grid) drawPaint();
 
   // コンボの表示。数が大きいほど大きく、ゆっくり浮いて消える
   for(let i=pops.length-1;i>=0;i--){
