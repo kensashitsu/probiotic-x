@@ -273,7 +273,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v112 (07-30 16:40)';
+const BUILD='v113 (07-30 16:58)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -474,7 +474,12 @@ let parkT=0, camW=1, isMouse=false;
 //   間を取って2.0＝0.5秒ごとに1匹。点火代は残す（短く点けても必ず1匹かかる）が、
 //   オーラは走行中に何度も点き直すので、点火代は1.2秒に1回までに制限する
 //   （これが無いと点滅のたびに1匹取られて、体感で「すぐ弾切れ」になる）
-const AURA_BURN=+(_q.get('burn')||2.0);
+// ★v113：鎖が長くなる一方だったので、消費を上げた上で【長さに比例】させる。
+//   纏う範囲は鎖の長さで広がる＝撒いている酸の量も増えるので、現象としても素直。
+//   これで「長い鎖のまま走り回る」が一番高くつく＝どこかで使わないと維持できない
+const AURA_BURN=+(_q.get('burn')||2.4);
+const AURA_BURN_K=+(_q.get('burnk')||0.05);   // 鎖1匹あたり毎秒いくら足すか
+function auraBurnRate(){ return AURA_BURN + AURA_BURN_K*joinedCount; }
 const AURA_IGNITE=+(_q.get('ignite')||1);
 const IGNITE_CD=+(_q.get('ignitecd')||1.2);
 let igniteT=-9;
@@ -2385,7 +2390,7 @@ function loop(ts){
     // ★オーラは酸を撒き散らしている状態なので、纏っている間は毎秒 桿菌を消費する。
     //   薙ぎ払いも無料ではなくなる＝拾った分をどこに使うかの選択が生まれる
     if(aura>0.35 && joinedCount>0){
-      auraAcc += AURA_BURN*dt;
+      auraAcc += auraBurnRate()*dt;
       while(auraAcc>=1 && joinedCount>0){
         auraAcc-=1;
         burnFx=1;                       // 燃えて減ったことを指先でも見せる
@@ -2396,7 +2401,7 @@ function loop(ts){
       if(AURA_IGNITE>0 && joinedCount>0 && clock-igniteT>IGNITE_CD){
         igniteT=clock; burnFx=1; spendChain(AURA_IGNITE); }                      // 点火代
       if(!burnSeen){ burnSeen=true;
-        tipMsg('纏うと乳酸菌を燃やす ─ 点火に1匹＋毎秒2匹（残りはHUDの「鎖」）'); } }
+        tipMsg('纏うと乳酸菌を燃やす ─ 鎖が長いほど速く燃える（残りはHUDの「鎖」）'); } }
     else if(wasArmed && aura<=0.35){ auraOffSnd(); auraLoopStop(); auraTail=AURA_TAIL; }   // ここから余韻
     if(aura>0.35) auraLoopMod((headSpd-AURA_LO)/Math.max(1,AURA_HI-AURA_LO));
     // 余韻の間は攻撃力は無いが、触れても飛び散らない（＝減速して囲みに入れる）
