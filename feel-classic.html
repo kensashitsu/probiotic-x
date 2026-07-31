@@ -142,8 +142,13 @@
   #ready .rn{font-size:11px;color:#5f6f77;margin-top:18px}
   #over .ttl{font-size:27px;font-weight:800;letter-spacing:.04em}
   #over .sub{font-size:13px;color:#9fb3ac;margin-top:10px;line-height:1.9}
-  #again{margin-top:16px;font:inherit;font-size:14px;font-weight:800;color:#0b0f14;background:#8ff0c0;
-    border:0;border-radius:999px;padding:10px 22px}
+  /* ★2つのボタンは同じ大きさに（v137と同じ考え方＝幅は中身ではなく半分ずつで決める） */
+  #over .obtns{display:flex;gap:10px;margin:16px auto 0;max-width:280px}
+  #again,#quit{font:inherit;font-size:14px;font-weight:800;border-radius:999px;padding:10px 12px;
+    border:0;flex:1 1 0;min-width:0;text-align:center}
+  #again{color:#0b0f14;background:#8ff0c0}
+  #quit{color:#9fb3ac;background:transparent;box-shadow:inset 0 0 0 2px rgba(159,179,172,.45)}
+  #quit:active{transform:translateY(2px)}
   /* ★PCで実機と同じ大きさを確かめるための枠（?sim=…）。
      body自身を実機の画面サイズにして中央に置くだけ。中のUIは全部bodyを基準に並ぶので、
      余白の詰まり具合も含めて実機と同じ配置になる */
@@ -276,7 +281,7 @@
 <!-- あそびかた（体験版は次の課題。まずは読める形で用意する） -->
 <div id="coach"><span id="coachtxt"></span><button id="coachnext">次へ ▶</button></div>
 <div id="over"><div class="ttl" id="overTtl"></div><div class="sub" id="overSub"></div>
-  <button id="again">もう一度</button></div>
+  <div class="obtns"><button id="again">もう一度</button><button id="quit">やめる</button></div></div>
 <div id="rot"><div class="ri"></div>
   <div class="rt2" id="rotTtl">横向きにしてください</div>
   <div class="rn3">この画面の向きでは遊べません。<br>回転ロックが入っていると向きが変わりません。</div></div>
@@ -284,7 +289,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v140 (07-31 18:20)';
+const BUILD='v141 (07-31 19:05)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1333,7 +1338,7 @@ function moveTo(x,y){
   const last=path[path.length-1];
   if(Math.hypot(x-last.x,y-last.y)>3){ path.push({x,y,t:clock}); if(path.length>600)path.shift(); }
   head={x,y}; catchNear(x,y);
-  if(sealCooldown<=0 && aura<=0.35) checkClose();   // 纏っている間は囲えない
+  if(sealCooldown<=0 && aura<=0.35 && tutAllow('seal')) checkClose();   // 纏っている間は囲えない
 }
 function end(){ dragging=false; }
 // ---- 漂っている個体同士をくっつける ----
@@ -1408,6 +1413,7 @@ function unlinkRod(r){
   r.link=null; r.clen=0;
 }
 function catchNear(x,y){
+  if(!tutAllow('catch')) return;    // チュートリアル：つなぐを教える前は拾わない
   // ★酸を纏っている間は拾えない。走りながら無限に伸ばせると無双になってしまう。
   //   「減速して集める → 加速して薙ぎ払う → 減速して囲む」という切り替えを作る
   if(aura>0.35){
@@ -1629,6 +1635,10 @@ function updateBar(){
 // ★この端末に残る上位5位の記録。並べ替えは発酵％（＝ゲージ）順で、
 //   同率なら乳酸菌の多い方＝より押し込んだ方を上に置く
 const RANK_KEY='pxRank5';
+// ★決着と記録の％は小数第一位まで（v141・ユーザー指示）。整数だと記録が同率で並んでしまい、
+//   1匹ぶんの差（＝ゲージ約0.3%）が順位に出なかった。古い記録は整数で入っているが、
+//   数値として同じ形に揃えて出す（プレイ中のHUDは読ませないので整数のまま）
+function pcTxt(v){ return (Math.round(v*10)/10).toFixed(1); }
 function loadRank(){
   try{ const a=JSON.parse(localStorage.getItem(RANK_KEY)||'[]'); return Array.isArray(a)? a:[]; }
   catch(e){ return []; }
@@ -1651,7 +1661,7 @@ function rankHtml(top, me){
     h+='<div style="display:flex;align-items:baseline;gap:9px;line-height:1.95;'
       +'font-variant-numeric:tabular-nums'+(mine?';color:#dff7ec;font-weight:800':'')+'">'
       +'<span style="width:14px;color:'+(mine?'#8ff0c0':'#5f7078')+'">'+(i+1)+'</span>'
-      +'<span style="width:46px;color:'+(mine?'#8ff0c0':'#bfe9d2')+'">'+r.pc+'%</span>'
+      +'<span style="width:58px;color:'+(mine?'#8ff0c0':'#bfe9d2')+'">'+pcTxt(r.pc)+'%</span>'
       +'<span>乳酸菌 <b style="color:'+(mine?'#dff7ec':'#bfe9d2')+'">'+r.ally+'</b>'
       +'　腐敗菌 <b style="color:#ea9ec0">'+r.foe+'</b></span>'
       +(mine?'<span style="margin-left:auto;color:#8ff0c0;font-size:10.5px">今回</span>':'')
@@ -1662,7 +1672,7 @@ function rankHtml(top, me){
 function finishGame(win,how){
   phase= win? 'win':'lose';
   dragging=false; activeId=null; auraLoopStop();
-  const pc=Math.round(gauge*100);
+  const pc=Math.round(gauge*1000)/10;      // 小数第一位まで（同率で並ばないように）
   elTime.textContent='0';
   // ★決着の内訳。タイムアタック版（却下）で作ったものだが、
   //   「今日は何が上手くいったのか」が分かるので90秒制でもそのまま出す
@@ -1675,9 +1685,9 @@ function finishGame(win,how){
   const rk=pushRank({pc:pc, ally:livingRods(), foe:livingFoes(), t:Date.now()});
   const rank=rankHtml(rk.top, rk.me);
   const ratio='<div style="font-size:22px;font-weight:800;line-height:1.2">'+
-    '<span style="color:#8ff0c0">発酵 '+pc+'%</span>'+
+    '<span style="color:#8ff0c0">発酵 '+pcTxt(pc)+'%</span>'+
     '<span style="color:#6f7d84;font-size:15px"> : </span>'+
-    '<span style="color:#e78ab0">腐敗 '+(100-pc)+'%</span></div>';
+    '<span style="color:#e78ab0">腐敗 '+pcTxt(100-pc)+'%</span></div>';
   if(win){
     elOverT.textContent = how==='ko'? '完封！' : '発酵した！';
     elOverT.style.color='#8ff0c0';
@@ -1855,6 +1865,7 @@ function sweptHit(ax,ay,bx,by,f,HIT){
 }
 function checkHit(guard){
   if(hitCd>0) return;
+  if(!tutAllow('hit')) return;      // チュートリアル：散るのを教える前は弾け飛ばない
   const HIT=RW/2+4;
   for(const f of foes){ if(f.dead) continue;
     if(sweptHit(prevHead.x,prevHead.y,head.x,head.y,f,HIT)){
@@ -2004,8 +2015,9 @@ cv.addEventListener('touchcancel',touchOff,{passive:false});
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){ activeId=null; end(); }
 });
+let noStartUntil=0;   // 「やめる」を押した指がそのままタイトルを押して始まるのを防ぐ
 function beginMatch(){
-  if(phase!=='ready') return;
+  if(phase!=='ready' || Date.now()<noStartUntil) return;
   ac();                                    // ここで音が有効になる（ブラウザの仕様）
   phase='play'; playT=0; firstStart=false;
   document.getElementById('ready').classList.add('hide');
@@ -2030,6 +2042,18 @@ const TUT=[
   { html:'🎯 本番は<b>60秒</b>。腐敗菌は<b>増える上に外からも入ってくる</b>——終わった時に<b>数の多い方が勝ち</b>だよ。', goal:null },
 ];
 let tutMode=false, tutStep=0, tutGoalMet=false, tutBig=0, tutAura=0;
+// ★チュートリアル中は「そのステップで教えている操作」以外を止める（v141・ユーザー指示）。
+//   ①見分けるの間に指を動かして勝手に3匹つながっている＝次の指令が最初から達成済み、
+//   ②教える前にオーラを纏って「拾えない・囲えない」に突き当たる、が実機で起きていた。
+//   本番のロジックには一切足さない＝ tutMode の時だけ false を返すガード
+function tutAllow(what){
+  if(!tutMode) return true;
+  if(what==='catch') return tutStep>=1;   // つなぐ
+  if(what==='seal')  return tutStep>=2;   // 囲む
+  if(what==='aura')  return tutStep>=4;   // 纏う
+  if(what==='hit')   return tutStep>=5;   // 触れると散る
+  return true;
+}
 let tutBase={sealed:0, big:0, aura:0};   // ステップに入った時点の控え（達成はここからの差分で見る）
 const elCoach=document.getElementById('coach'), elCoachTxt=document.getElementById('coachtxt'),
       elCoachNext=document.getElementById('coachnext');
@@ -2091,6 +2115,21 @@ function updSndBtn(){
     elSnd.textContent= muted? '🔇':'🔊'; }
 }
 document.getElementById('again').addEventListener('click',()=>{scatter();});
+// ★決着から「やめる」＝タイトルへ戻る（v141・ユーザー指示）。
+//   盤面は撒き直してタイトルの背景にする。次は「はじめる」から60秒が始まる
+function backToTitle(){
+  noStartUntil=Date.now()+450;
+  dragging=false; activeId=null; auraLoopStop();
+  tutMode=false; elCoach.classList.remove('show');
+  scatter(); phase='ready'; playT=0;
+  elOver.classList.remove('show');
+  document.getElementById('ready').classList.remove('hide');
+  updateHud(); updateBar();
+}
+['click','touchend'].forEach(ev=>{
+  document.getElementById('quit').addEventListener(ev,e=>{
+    e.preventDefault(); e.stopPropagation(); backToTitle(); },{passive:false});
+});
 
 // ---- 酸の帯を尾から蒸発させる ----
 // 古い点を先頭から捨てる。ただし鎖が追従に使う長さ分は age を無視して残す（団子防止）
@@ -2797,6 +2836,7 @@ function loop(ts){
       flowT = (camW>0.35 && Math.hypot(camVel.x,camVel.y)>AURA_FLOW)? FLOW_LATCH : Math.max(0,flowT-dt);
       if(flowT>0) want=Math.max(want, gate*start0);
     }
+    if(!tutAllow('aura')) want=0;      // チュートリアル：纏うを教える前は点火しない
     const wasArmed=aura>0.35;
     aura += (want-aura)*Math.min(1,dt*(want>aura?22:5));   // 点くのは素早く、消えるのは緩やか
     // ★オーラは酸を撒き散らしている状態なので、纏っている間は毎秒 桿菌を消費する。
