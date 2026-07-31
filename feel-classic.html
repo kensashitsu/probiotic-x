@@ -281,7 +281,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v131 (07-31 14:26)';
+const BUILD='v132 (07-31 15:01)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -460,8 +460,12 @@ const AURA_HI=+(_q.get('aurahi')||1300);  // ここで最大
 //   ただし「纏う」＝拾えない・囲えない だと代償が大きい（実測：一筆で拾える鎖 12→8匹）。
 //   そこで**守りだけ**を渡す：流れている間は触れても飛び散らない（＝GUARD_FLOW）。
 //   拾う・囲うは今まで通りできるので、見えないまま突っ込む事故だけが消える。
-//   AURA_FLOW は「纏う」版（拾えなくなる）。試したい時だけ ?flowaura=600 で有効にする
-const AURA_FLOW=+(_q.get('flowaura')||0);
+//   AURA_FLOW は「纏う」版。v132でユーザー指示により既定オン＝盤面が動き出した瞬間に纏う。
+//   閾値を低くしているのは「惰性で動く時は必ず速い」＝流れ始め＝疾走 だから（?flowaura=0 で無効）
+const AURA_FLOW=+(_q.get('flowaura')||25);
+// 動き出しの数フレームは camVel が 9→26→3→33 のように揺れる（指が中心の不感帯を跨ぐため）。
+// 低い閾値だと点いたり消えたりするので、いったん流れたらこの秒数は点いたままにする
+const FLOW_LATCH=+(_q.get('flowlatch')||0.25);
 const GUARD_FLOW=+(_q.get('gflow')||400); // 盤面がこの速さ以上で流れていたら守る(px/秒)。0で無効
 const AURA_R0=+(_q.get('aura0')||40);     // オーラの基準半径（短い列でも見える大きさ）
 const AURA_PER=+(_q.get('aurap')||1.7);   // 桿菌1匹あたり広がる分
@@ -493,7 +497,7 @@ const AURA_BURN_K=+(_q.get('burnk')||0.035);   // 鎖1匹あたり毎秒いく�
 function auraBurnRate(){ return AURA_BURN + AURA_BURN_K*joinedCount; }
 const AURA_IGNITE=+(_q.get('ignite')||1);
 const IGNITE_CD=+(_q.get('ignitecd')||1.2);
-let igniteT=-9;
+let igniteT=-9, flowT=0;
 let auraAcc=0;
 let burnFx=0;        // 今の消費がオーラ由来か（表示の色分け用）
 // ★中和の音は、同時に鳴る「鎖が砕ける音」「弾かれた音」に埋もれて聞こえなかった。
@@ -746,7 +750,7 @@ function followCam(dt){
     prevFinger.x=finger.x; prevFinger.y=finger.y; return;
   }
   if(!dragging){ if(aura>0) auraLoopStop();
-    aura=0; guardOn=false; headSpd=0; fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
+    aura=0; guardOn=false; headSpd=0; flowT=0; fingerVel.x=0; fingerVel.y=0; turnRate=0; straight=1; dirRef.ang=null;
     camVel.x=0; camVel.y=0;
     prevFinger.x=finger.x; prevFinger.y=finger.y; return; }
   const vx=(finger.x-prevFinger.x)/Math.max(0.001,dt), vy=(finger.y-prevFinger.y)/Math.max(0.001,dt);
@@ -1294,7 +1298,7 @@ function start(x,y){
   // カメラは「向きが確定してから」流す。初動で流すと輪が敵からずれて空振りする
   straight=0; turnRate=0; strokeT0=clock; camVel.x=0; camVel.y=0;
   dirRef={x:finger.x, y:finger.y, ang:null, t:clock};
-  auraPF.x=finger.x; auraPF.y=finger.y; aura=0; auraTail=0; headSpd=0; parkT=0; camW=1;
+  auraPF.x=finger.x; auraPF.y=finger.y; aura=0; auraTail=0; headSpd=0; parkT=0; camW=1; flowT=0;
   if(MIX){ lead.x=0; lead.y=0; }   // 触った所が先頭＝掴み直しは素直に
   ac(); catchNear(x,y);
 }
@@ -2665,8 +2669,15 @@ function loop(ts){
     //   最初の1匹は touchstart 時点で拾えているので、抑制は最小限で足りる
     const start0=(clock-strokeT0<0.12)?0:1;
     let want=Math.max(0,Math.min(1,(headSpd-AURA_LO)/(AURA_HI-AURA_LO)))*gate*start0;
-    // 盤面が流れ出したら（＝スクロール中＝先が見えない）その時点で纏う
-    if(AURA_FLOW>0 && Math.hypot(camVel.x,camVel.y)>AURA_FLOW) want=Math.max(want, gate*start0);
+    // 盤面が流れ出したら（＝スクロール中＝先が見えない）その時点で纏う。
+    // ★速さの閾値（800px/秒）だけだと、指の振りが遅い時は「カメラが加速し終わるまで」待つので
+    //   点火が 0.40秒まで遅れる（実測）。盤面が動き出した瞬間＝疾走の始まり、として点ける
+    // ★camW を掛けるのを忘れない：指を端に置いたまま止めていても盤面は流れ続けるので、
+    //   これが無いと「動かしていないのにオーラが点きっぱなし」に戻る（v45で直した罠）
+    if(AURA_FLOW>0){
+      flowT = (camW>0.35 && Math.hypot(camVel.x,camVel.y)>AURA_FLOW)? FLOW_LATCH : Math.max(0,flowT-dt);
+      if(flowT>0) want=Math.max(want, gate*start0);
+    }
     const wasArmed=aura>0.35;
     aura += (want-aura)*Math.min(1,dt*(want>aura?22:5));   // 点くのは素早く、消えるのは緩やか
     // ★オーラは酸を撒き散らしている状態なので、纏っている間は毎秒 桿菌を消費する。
