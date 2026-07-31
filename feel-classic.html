@@ -293,7 +293,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v137 (07-31 15:48)';
+const BUILD='v138 (07-31 16:36)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1648,11 +1648,11 @@ function finishGame(win,how){
   elTime.textContent='0';
   // ★決着の内訳。タイムアタック版（却下）で作ったものだが、
   //   「今日は何が上手くいったのか」が分かるので90秒制でもそのまま出す
+  // ※「外から侵入」は毎回ほぼ同じ数（＝腕前で動かない）ので外した（v138）
   const st=(c)=>'<div style="margin-top:9px;font-size:12.5px;color:#9fb3ac;line-height:1.9">'+
     '溶かした腐敗菌 <b style="color:'+c+'">'+totalSealed+'</b>'+
     '　最大コンボ <b style="color:'+c+'">'+bestCombo+'</b><br>'+
-    '最長の鎖 <b style="color:'+c+'">'+bestChain+'</b>'+
-    '　外から侵入 <b style="color:#e78ab0">'+invTotal+'</b></div>';
+    '最長の鎖 <b style="color:'+c+'">'+bestChain+'</b></div>';
   // 上位5位の記録に今回を差し込む（並べ替えの結果、入らないこともある）
   const rk=pushRank({pc:pc, ally:livingRods(), foe:livingFoes(), t:Date.now()});
   const rank=rankHtml(rk.top, rk.me);
