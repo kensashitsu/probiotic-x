@@ -284,7 +284,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v139 (07-31 16:52)';
+const BUILD='v140 (07-31 18:20)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -982,6 +982,13 @@ function livingRods(){ let n=0; for(const r of rods) if(!r.dying) n++; return n;
 function livingFoes(){ let n=0; for(const f of foes) if(!f.dead) n++; return n; }
 const AM_RATE=+(_q.get('am')||0.45);   // 靄の発生（個/秒・腐敗菌が多いほど増える）
 const AM_LIFE=+(_q.get('amlife')||9);  // 靄の寿命(秒)
+// ★靄を晴らした跡から乳酸菌が湧く（v140）。
+//   靄は9秒で勝手に消えるので、放置してもプレイヤーは何も損をしない＝
+//   わざわざ代金を払って中和しに行く理由が「待てばいい」に負けていた。
+//   罰（放置すると不利）で動かすと、こちらの快感＝「大きく囲んで溶かす」を削るので、
+//   誘因の側で動かす＝晴らせば弾薬が返ってくる。実際、アンモニアが中和されて
+//   pHが戻った所には乳酸菌が住み直せる、という筋も通る
+const CLEAR_GIFT=+(_q.get('gift')||4);  // 靄1つ晴らすと湧く乳酸菌の数
 const AM_R   =66*SCALE;                // 靄の半径
 let ammo=[], amAcc=0, amSeen=false, divSeen=false, hazeSeen=false, hazeSeen2=false, emptySeen=false;
 function inAmmonia(x,y){
@@ -1171,6 +1178,22 @@ function refundAllies(spots){
   }
   if(n>0 && !refundSeen){ refundSeen=true;
     tipMsg('溶けた腐敗菌は栄養になる ─ 大きく溶かすほど乳酸菌が増えて弾薬が返る'); }
+  return n;
+}
+// ★靄を晴らした跡に乳酸菌が湧く（v140）。晴れた輪の内側に散らして置く＝
+//   「取り返した土地」がそのまま弾薬になって見える
+let giftSeen=false, giftTotal=0;
+function giftAllies(x,y,r){
+  if(CLEAR_GIFT<=0) return 0;
+  let n=0;
+  for(let i=0;i<CLEAR_GIFT;i++){
+    if(livingRods()+livingFoes() >= capCount()) break;   // 食品の容量まで
+    const ang=(i/CLEAR_GIFT)*6.283+rnd(0,1.2), d=r*rnd(0.25,0.8);
+    spawnAllyAt(x+Math.cos(ang)*d, y+Math.sin(ang)*d); n++;
+  }
+  giftTotal+=n;
+  if(n>0 && !giftSeen){ giftSeen=true;
+    tipMsg('晴らした跡には乳酸菌が戻る ─ 中和は弾薬になる'); }
   return n;
 }
 // 掴まれている間の進行と、奪われた瞬間
@@ -1478,7 +1501,7 @@ function doSeal(poly){
   }
   let sealed=0, resisted=0, paid=0;
   const rescued=rescueGrabs(poly);      // 掴まれている乳酸菌を助ける（無料）
-  const hazed=[], spots=[];             // spots＝溶かした位置（栄養の回収に使う）
+  const hazed=[], spots=[], cleared=[]; // spots＝溶かした位置（栄養の回収に使う）／cleared＝晴らした靄
   for(const f of foes){
     if(f.dead) continue;
     if(!pointInPoly(f.x,f.y,poly)) continue;
@@ -1511,6 +1534,7 @@ function doSeal(poly){
       bits.push({x:a.x, y:a.y-16, vx:0, vy:-0.6, life:1.5, r:1, txt:'晴れた！', col:'mint'});
       shake=Math.max(shake, 7);
       clearSnd();
+      cleared.push({x:a.x, y:a.y, r:before});   // ★晴れた跡＝乳酸菌が戻る（封印の代金を払った後に湧かせる）
     }
   }
   if(shrunk>0) neutralSnd(shrunk, joinedCount);
@@ -1548,6 +1572,8 @@ function doSeal(poly){
   if(shrunk>0 && sealed===0) crackMute=true;    // 中和の音を立たせる
   if(sealed>0||shrunk>0) spendChain(sealCost(poly, sealed));
   crackMute=false; sealFx.on=false;
+  // ★晴らした跡から乳酸菌が戻る。代金を払った後に湧かせる（払う前だと容量の判定がずれる）
+  for(const c of cleared) giftAllies(c.x, c.y, c.r);
   // ★散った仲間の立て直しは「どんな輪でも」効く。酸切れ等は溶かした輪の中だけ
   reviveInside(poly, sealed>0||shrunk>0);
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
@@ -2000,7 +2026,7 @@ const TUT=[
   { html:'溶かした相手は<b>栄養</b>になって乳酸菌が増える。代金は<b>輪の大きさ＋溶かした数</b>ぶんの鎖なので、<b>2匹以上まとめて</b>囲うほど得だよ。まとめて溶かしてみよう！', goal:()=>tutBig-tutBase.big>=1 },
   { html:'<b>速く走る</b>と<b>酸のオーラ</b>を纏う。触れた敵の連鎖を弾き飛ばせるけど、纏っている間は<b>拾えない・囲えない</b>。盤面を大きく<b>ひと振り</b>してみよう！', goal:()=>tutAura-tutBase.aura>=1 },
   { html:'腐敗菌に<b>触れる</b>と鎖の半分がちぎれて散る（菌は死なない）。散った<b>半透明の仲間</b>は、<b>囲えばその場で立ち直る</b>よ。', goal:null },
-  { html:'桃色の<span class="no">靡＝アンモニア</span>の中では溶かせない。<b>囲うたびに中和されて縮む</b>ので、削り切ってから溶かそう。', goal:null },
+  { html:'桃色の<span class="no">靄＝アンモニア</span>の中では溶かせない。<b>囲うたびに中和されて縮む</b>ので、削り切ってから溶かそう。<b>晴らした跡には乳酸菌が戻る</b>よ。', goal:null },
   { html:'🎯 本番は<b>60秒</b>。腐敗菌は<b>増える上に外からも入ってくる</b>——終わった時に<b>数の多い方が勝ち</b>だよ。', goal:null },
 ];
 let tutMode=false, tutStep=0, tutGoalMet=false, tutBig=0, tutAura=0;
@@ -3799,7 +3825,9 @@ window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals
   head:()=>head, cam:()=>cam, zoom:()=>zoom, straight:()=>straight, turn:()=>turnRate, camVel:()=>camVel, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
   bounds:()=>({top:PLAY_TOP,bot:playBot()}),
   tut:()=>({mode:tutMode,step:tutStep,met:tutGoalMet,big:tutBig,aura:tutAura}),
-  tutSkip:()=>{ tutGoalMet=true; showCoach(); }};
+  tutSkip:()=>{ tutGoalMet=true; showCoach(); },
+  aura:()=>aura, ammo:()=>ammo, living:()=>livingRods(), gift:()=>giftTotal,
+  spawnAm:(x,y)=>{ ammo.push({x,y,r:AM_R*0.3,max:AM_R,t:0,life:999,ph:0}); return ammo.length; }};
 </script>
 </body>
 </html>
