@@ -27,6 +27,11 @@
     background:linear-gradient(90deg,rgba(74,47,42,.42),rgba(122,74,56,.42));
     -webkit-backdrop-filter:blur(2px) saturate(.9);backdrop-filter:blur(2px) saturate(.9);
     box-shadow:inset 0 0 0 1px rgba(255,255,255,.14), 0 2px 10px rgba(0,0,0,.35)}
+  /* ★腐り切りまでの猶予の間だけ、ゲージそのものが腐敗色で脈打つ（文字は足さない） */
+  #bar.rot{animation:rotpulse .85s ease-in-out infinite}
+  @keyframes rotpulse{
+    0%,100%{box-shadow:inset 0 0 0 1px rgba(255,255,255,.14), 0 2px 10px rgba(0,0,0,.35)}
+    50%{box-shadow:inset 0 0 0 2px rgba(255,120,170,.85), 0 0 16px rgba(255,110,165,.55)}}
   #barL{position:absolute;left:0;top:0;bottom:0;width:50%;
     background:linear-gradient(90deg,rgba(47,156,120,.52),rgba(143,240,192,.58))}
   #barMid{position:absolute;top:-2px;bottom:-2px;left:50%;width:3px;margin-left:-1.5px;
@@ -289,7 +294,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v144 (08-01 11:05)';
+const BUILD='v145 (08-01 12:10)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -306,6 +311,7 @@ const elCnt=document.getElementById('cnt');   // ★HUDからは外したので�
 const elTm=document.querySelector('#nums .tm');
 const elAlly=document.getElementById('nAlly'), elFoe=document.getElementById('nFoe');
 const elBarL=document.getElementById('barL'), elBarMid=document.getElementById('barMid');
+const elBar=document.getElementById('bar');
 const elPcL=document.getElementById('pcL'), elPcR=document.getElementById('pcR');
 const elTime=document.getElementById('tleft');
 const elChain=document.getElementById('nChain'), elChainBox=document.getElementById('chainbox');
@@ -962,7 +968,20 @@ let linkT=0;
 const BUMP_EVERY=0.08;
 let bumpT=0, ringT=0;
 const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
-const WIN_AT=0.94, LOSE_AT=0.06;
+// ★決着の線。完封＝腐敗菌0匹 or 発酵94%／腐り切り＝乳酸菌0匹 or 発酵がこの値以下。
+// ★v145：腐り切りの線を 6% → 36% に上げた（ユーザー選択）。
+//   6%は【構造的に到達不可能】だった＝総数の上限(開始×4=552)と奪いの下限(開始×45%=62匹)があるので
+//   最悪でも 62/552＝11% までしか落ちず、実際は味方が131匹残って**23.7%が底**（放置180秒の実測）。
+//   つまり「腐ってしまった…」は自分で鎖を使い潰した時しか出ない文言だった。
+//   放置の実測は 30秒43.8% / 60秒35.4% なので、36%なら**放置は時間切れ寸前に腐り切る**＝
+//   「何もしなければ腐る」が結末として出る。戦っていれば37%以上を保てるので生き残る
+// ★ただし線を跨いだ瞬間に終わらせると、**戦っていて盛り返す途中の人まで切ってしまう**
+//   （実測：自動プレイは中盤に36%を割ってから終盤に39〜44%まで戻す＝瞬間判定だと41〜51秒で終了）。
+//   なので「この線を下回ったまま ROT_HOLD 秒 続いたら腐り切り」にする＝
+//   一時的に押されただけなら死なない／押されっぱなしなら腐る
+const WIN_AT=+(_q.get('win')||0.94), LOSE_AT=+(_q.get('lose')||0.36);
+const ROT_HOLD=+(_q.get('rothold')||8);   // 腐り切りまでの猶予(秒)
+let rotT=0;
 // ★決着画面に出す記録（v120のタイムアタックは却下したが、この内訳は残す）
 let bestCombo=0, bestChain=0;
 // ★v127：60秒に戻す（実機で「90秒は長く感じる」）。
@@ -1063,7 +1082,7 @@ function scatter(){
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; reviveSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; foeAlert=0; cdLast=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
-  foeAcc=0; allyAcc=0; hazeAcc=0;
+  foeAcc=0; allyAcc=0; hazeAcc=0; rotT=0; elBar.classList.remove('rot');
   elOver.classList.remove('show');
   updateHud(); updateBar();
 }
@@ -1681,6 +1700,7 @@ function rankHtml(top, me){
 }
 function finishGame(win,how){
   phase= win? 'win':'lose';
+  rotT=0; elBar.classList.remove('rot');
   dragging=false; activeId=null; auraLoopStop();
   const pc=Math.round(gauge*1000)/10;      // 小数第一位まで（同率で並ばないように）
   elTime.textContent='0';
@@ -3045,8 +3065,14 @@ function loop(ts){
     elTm.classList.toggle('hot', left<=10);   // 見た目はCSS側（赤く点って脈打つ）
     if(!tutMode){                       // ★チュートリアル中は勝敗が付かない
       if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
-      else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
-      else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
+      else if(nA===0) finishGame(false,'ko');
+      else{
+        // 腐り切り＝線を下回ったまま ROT_HOLD 秒。押し返せば消える猶予
+        rotT = (gauge<=LOSE_AT)? rotT+dt : 0;
+        elBar.classList.toggle('rot', rotT>0);      // 猶予の間はゲージの腐敗側が脈打つ（文字は足さない）
+        if(rotT>=ROT_HOLD) finishGame(false,'ko');
+        else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
+      }
     }
     updateHud();
     if(tutMode) tutCheck();
