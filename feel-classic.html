@@ -64,8 +64,13 @@
   #nums .s2{transition:transform .12s ease-out}
   #nums .s2.inv b{color:#ff9ec8;text-shadow:0 0 9px rgba(255,120,180,.95)}
   #nums .s2.inv{transform:scale(1.14)}
-  #nums .tm b{font-size:14px;color:#bfe9d2}
-  #nums .s3{margin-left:auto}
+  /* ★残り時間は試合そのものなので、行の真ん中に置いて他の数字より大きく出す。
+     左右のグループを同じ重み（flex:1）にすると、中身の幅が変わっても中央がずれない */
+  #nums .grp{flex:1;display:flex;align-items:center;gap:9px;min-width:0}
+  #nums .gR{justify-content:flex-end}
+  #nums .tm{flex:0 0 auto;padding:0 2px}
+  #nums .tm b{font-size:20px;line-height:1;color:#dff7ec;letter-spacing:.02em;
+    text-shadow:0 0 10px rgba(140,240,200,.35)}
   #reset{pointer-events:auto;font:inherit;font-size:10.5px;font-weight:700;color:#9fb3ac;
     background:rgba(255,255,255,.07);border:0;border-radius:999px;padding:4px 10px}
   /* 音が出ているか自分で確かめられるボタン。消音中は赤くして「今どっちか」を出す */
@@ -80,7 +85,8 @@
   /* 決着 */
   #over{position:absolute;left:24px;right:24px;top:30%;z-index:9;text-align:center;
     background:rgba(7,12,15,.93);border:1px solid #26343c;border-radius:18px;padding:24px 18px;
-    display:none}
+    /* 記録の5行を足したぶん、狭い画面でははみ出すのでここだけ縦に送れるようにする */
+    max-height:calc(100% - 56px);overflow-y:auto;display:none}
   #over.show{display:block}
   /* タイトル：ブラウザは最初の操作まで音を鳴らせないので、その一手を兼ねる。
      試合の90秒もここから始まる（開いた瞬間から減っていたのを修正） */
@@ -172,7 +178,8 @@
   body.short #bar{height:17px}
   body.short #bar .cap,body.short #pcL,body.short #pcR{font-size:9.5px}
   body.short #nums{margin-top:3px;font-size:10px;gap:7px}
-  body.short #nums b{font-size:11px} body.short #nums .tm b{font-size:12px}
+  body.short #nums b{font-size:11px} body.short #nums .tm b{font-size:17px}
+  body.short #nums .grp{gap:7px}
   body.short #reset{font-size:9.5px;padding:3px 8px}
   body.short #tip{top:calc(env(safe-area-inset-top) + 42px);font-size:10.5px}
   body.short #ready .mascot{width:78px}
@@ -185,9 +192,9 @@
      折り返さないよう詰め、累計の「溶かした」だけ省く（決着画面で出るので live では不要） */
   @media (orientation:portrait){
     #nums{gap:8px}
-    #nums>*{white-space:nowrap}
+    #nums .grp{gap:8px}
+    #nums *{white-space:nowrap}
     #nums .s3{display:none}
-    #sndbtn{margin-left:auto}
   }
   /* ホーム画面に追加すればバーごと消える。スタンドアロン起動中は出さない */
   #a2hs{display:none} body.nostandalone #a2hs{display:block}
@@ -204,13 +211,17 @@
     <div id="pcL">50%</div><div id="pcR">50%</div>
   </div>
   <div id="nums">
-    <span class="tm">残り <b id="tleft">60</b></span>
-    <span class="s1" id="allybox">乳酸菌 <b id="nAlly">0</b></span>
-    <span class="s2" id="foebox">腐敗菌 <b id="nFoe">0</b></span>
-    <span class="s4" id="chainbox">鎖 <b id="nChain">0</b></span>
-    <span class="s3">溶かした <b id="cnt">0</b></span>
-    <button id="sndbtn" title="テスト音">🔊</button>
-    <button id="reset">やり直す</button>
+    <span class="grp gL">
+      <span class="s1" id="allybox">乳酸菌 <b id="nAlly">0</b></span>
+      <span class="s2" id="foebox">腐敗菌 <b id="nFoe">0</b></span>
+      <span class="s4" id="chainbox">鎖 <b id="nChain">0</b></span>
+    </span>
+    <span class="tm"><b id="tleft">60</b></span>
+    <span class="grp gR">
+      <span class="s3">溶かした <b id="cnt">0</b></span>
+      <button id="sndbtn" title="テスト音">🔊</button>
+      <button id="reset">やり直す</button>
+    </span>
   </div>
 </div>
 <div id="tip">なぞって乳酸菌を繋ぐほど酸の帯が伸び、大きく囲める ─ 囲えば溶ける／触れれば弾ける</div>
@@ -280,7 +291,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v134 (07-31 15:19)';
+const BUILD='v135 (07-31 15:29)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1595,6 +1606,39 @@ function updateBar(){
   elPcL.style.color = (p<20)? '#f0fbf6' : '#08281e';
   elPcR.style.color = (p>80)? '#0b2119' : '#ffe0d2';
 }
+// ★この端末に残る上位5位の記録。並べ替えは発酵％（＝ゲージ）順で、
+//   同率なら乳酸菌の多い方＝より押し込んだ方を上に置く
+const RANK_KEY='pxRank5';
+function loadRank(){
+  try{ const a=JSON.parse(localStorage.getItem(RANK_KEY)||'[]'); return Array.isArray(a)? a:[]; }
+  catch(e){ return []; }
+}
+function pushRank(rec){
+  const a=loadRank(); a.push(rec);
+  a.sort((x,y)=> (y.pc-x.pc) || (y.ally-x.ally) || ((x.t||0)-(y.t||0)));
+  const top=a.slice(0,5);
+  try{ localStorage.setItem(RANK_KEY, JSON.stringify(top)); }catch(e){}
+  return {top, me:top.indexOf(rec)};
+}
+function rankHtml(top, me){
+  if(!top.length) return '';
+  let h='<div style="margin-top:13px;padding-top:11px;border-top:1px solid #1d2a33;'
+      + 'font-size:12px;color:#6f8188;text-align:left">'
+      + '<div style="color:#9fb3ac;font-weight:800;letter-spacing:.06em;font-size:11px;'
+      + 'margin-bottom:5px;text-align:center">この端末の記録　上位5</div>';
+  top.forEach((r,i)=>{
+    const mine=(i===me);
+    h+='<div style="display:flex;align-items:baseline;gap:9px;line-height:1.95;'
+      +'font-variant-numeric:tabular-nums'+(mine?';color:#dff7ec;font-weight:800':'')+'">'
+      +'<span style="width:14px;color:'+(mine?'#8ff0c0':'#5f7078')+'">'+(i+1)+'</span>'
+      +'<span style="width:46px;color:'+(mine?'#8ff0c0':'#bfe9d2')+'">'+r.pc+'%</span>'
+      +'<span>乳酸菌 <b style="color:'+(mine?'#dff7ec':'#bfe9d2')+'">'+r.ally+'</b>'
+      +'　腐敗菌 <b style="color:#ea9ec0">'+r.foe+'</b></span>'
+      +(mine?'<span style="margin-left:auto;color:#8ff0c0;font-size:10.5px">今回</span>':'')
+      +'</div>';
+  });
+  return h+'</div>';
+}
 function finishGame(win,how){
   phase= win? 'win':'lose';
   dragging=false; activeId=null; auraLoopStop();
@@ -1607,6 +1651,9 @@ function finishGame(win,how){
     '　最大コンボ <b style="color:'+c+'">'+bestCombo+'</b><br>'+
     '最長の鎖 <b style="color:'+c+'">'+bestChain+'</b>'+
     '　外から侵入 <b style="color:#e78ab0">'+invTotal+'</b></div>';
+  // 上位5位の記録に今回を差し込む（並べ替えの結果、入らないこともある）
+  const rk=pushRank({pc:pc, ally:livingRods(), foe:livingFoes(), t:Date.now()});
+  const rank=rankHtml(rk.top, rk.me);
   const ratio='<div style="font-size:22px;font-weight:800;line-height:1.2">'+
     '<span style="color:#8ff0c0">発酵 '+pc+'%</span>'+
     '<span style="color:#6f7d84;font-size:15px"> : </span>'+
@@ -1617,14 +1664,14 @@ function finishGame(win,how){
     elOverS.innerHTML=ratio+st('#8ff0c0')+
       '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
       (how==='ko'? '腐敗菌を抑え切った。酸が行き渡った場所は、もう腐敗に傾きません。'
-                 : '乳酸菌が多いまま守り切った＝発酵の勝ち。')+'</div>';
+                 : '乳酸菌が多いまま守り切った＝発酵の勝ち。')+'</div>'+rank;
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
   }else{
     elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
     elOverT.style.color='#ff9a80';
     elOverS.innerHTML=ratio+st('#ffb9a6')+
       '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
-      '腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</div>';
+      '腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</div>'+rank;
   }
   elOver.classList.add('show');
 }
@@ -2823,7 +2870,8 @@ function loop(ts){
     else if(elFoeBox.classList.contains('inv')) elFoeBox.classList.remove('inv');
     const left=Math.max(0,TIME_LIMIT-playT);
     elTime.textContent=Math.ceil(left);
-    elTime.style.color= left<=10? '#ff9a80' : '#bfe9d2';
+    elTime.style.color= left<=10? '#ff9a80' : '#dff7ec';
+    elTime.style.textShadow= left<=10? '0 0 12px rgba(255,140,110,.75)' : '0 0 10px rgba(140,240,200,.35)';
     if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
     else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
     else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
