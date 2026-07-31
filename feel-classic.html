@@ -61,6 +61,10 @@
   #nums .s1{transition:transform .12s ease-out}
   #nums .s1.hurt b{color:#ff9a80;text-shadow:0 0 8px rgba(255,120,90,.9)}
   #nums .s1.hurt{transform:scale(1.12)}
+  /* 外から入ってきた瞬間だけ「腐敗菌」を桃色に弾ませる */
+  #nums .s2{transition:transform .12s ease-out}
+  #nums .s2.inv b{color:#ff9ec8;text-shadow:0 0 9px rgba(255,120,180,.95)}
+  #nums .s2.inv{transform:scale(1.14)}
   #nums .tm b{font-size:14px;color:#bfe9d2}
   #nums .s3{margin-left:auto}
   #reset{pointer-events:auto;font:inherit;font-size:10.5px;font-weight:700;color:#9fb3ac;
@@ -204,7 +208,7 @@
     <span class="foodname" id="foodname">ぬか床</span>
     <span class="tm">残り <b id="tleft">60</b></span>
     <span class="s1" id="allybox">乳酸菌 <b id="nAlly">0</b></span>
-    <span class="s2">腐敗菌 <b id="nFoe">0</b></span>
+    <span class="s2" id="foebox">腐敗菌 <b id="nFoe">0</b></span>
     <span class="s4" id="chainbox">鎖 <b id="nChain">0</b></span>
     <span class="s3">溶かした <b id="cnt">0</b></span>
     <button id="sndbtn" title="テスト音">🔊</button>
@@ -275,7 +279,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v127 (07-31 14:05)';
+const BUILD='v128 (07-31 14:11)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -295,6 +299,7 @@ const elPcL=document.getElementById('pcL'), elPcR=document.getElementById('pcR')
 const elTime=document.getElementById('tleft');
 const elChain=document.getElementById('nChain'), elChainBox=document.getElementById('chainbox');
 const elAllyBox=document.getElementById('allybox');
+const elFoeBox=document.getElementById('foebox');
 const elOver=document.getElementById('over'), elOverT=document.getElementById('overTtl'),
       elOverS=document.getElementById('overSub');
 let W,H,DPR,portrait=false;
@@ -1023,7 +1028,7 @@ function scatter(){
   // ★盤面は画面より広いので、原点(0,0)のままだと必ず左上から始まってしまう。
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; foeAlert=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -1213,7 +1218,7 @@ function spawnFoe(){
 //   侵入は【頭数に比例しない一定の流入】なので、腕前で押し切れるが、完封は許さない。
 //   しかも「囲んで溶かす相手が絶えず供給される」＝快感の回数はむしろ増える。
 const INVADE=+(_q.get('inv')||1.0);       // 平均で毎秒この数だけ縁から入ってくる
-let invAcc=0, invSeen=false, invTotal=0;
+let invAcc=0, invSeen=false, invTotal=0, foeAlert=0;
 let invFx=[];                              // 侵入口の演出 {x,y,life}
 function spawnInvader(){
   if(livingRods()+livingFoes() >= capCount()) return;
@@ -1227,8 +1232,11 @@ function spawnInvader(){
   else { f.x=wx-M; f.y=rnd(PLAY_TOP+M,yb-M); f.wa=Math.PI; }
   f.born=clock; f.ws=rnd(.8,1.6);
   invFx.push({x:f.x, y:f.y, life:1});
+  // ★「知らないうちに増えていた」と言われたので、気づける手を3つ足す：
+  //   ①HUDの腐敗菌を桃色に弾ませる ②画面外なら縁に矢印 ③ミニマップで点滅（下で描画）
+  foeAlert=1;   // 音は付けない（見た目だけで知らせる）
   if(!invSeen){ invSeen=true;
-    tipMsg('外から腐敗菌が入ってくる ─ 全部は倒し切れない。押し返し続けろ'); }
+    tipMsg('外から腐敗菌が入ってきた ─ 縁の波紋とミニマップで場所が分かる'); }
 }
 // ---------------- 入力 ----------------
 let dragging=false, path=[], orderSeq=0, joinedCount=0, head={x:0,y:0}, prevHead={x:0,y:0};
@@ -2747,6 +2755,9 @@ function loop(ts){
     // 奪われた合図（HUDの「乳酸菌」を一瞬赤くする）
     if(allyHurt>0){ elAllyBox.classList.add('hurt'); allyHurt=Math.max(0,allyHurt-dt*3.2); }
     else if(elAllyBox.classList.contains('hurt')) elAllyBox.classList.remove('hurt');
+    // 外から入ってきた合図
+    if(foeAlert>0){ elFoeBox.classList.add('inv'); foeAlert=Math.max(0,foeAlert-dt*2.6); }
+    else if(elFoeBox.classList.contains('inv')) elFoeBox.classList.remove('inv');
     const left=Math.max(0,TIME_LIMIT-playT);
     elTime.textContent=Math.ceil(left);
     elTime.style.color= left<=10? '#ff9a80' : '#bfe9d2';
@@ -3014,7 +3025,7 @@ function loop(ts){
   }
   // ★外から入ってきた場所の波紋（縁のどこから入られたかが見える）
   for(let i=invFx.length-1;i>=0;i--){
-    const v=invFx[i]; v.life-=dt*1.3;
+    const v=invFx[i]; v.life-=dt*0.9;
     if(v.life<=0){ invFx.splice(i,1); continue; }
     if(!inView(v.x,v.y,80)) continue;
     const u=1-v.life;
@@ -3480,6 +3491,30 @@ function loop(ts){
   // ★画面のすぐ外にいる腐敗菌を、縁の印で知らせる。
   //   先読みカメラで余白は稼いだが、それでも全速なら0.1秒ぶんしか見えない。
   //   「そこに居る」が分かれば、ぶつかってから気づく事故は減る
+  // ★外から入ってきた地点が画面外なら、縁に印を出す（どっちから入られたかが分かる）
+  if(invFx.length){
+    g.save();
+    for(const v of invFx){
+      const sx=(v.x-viewX())*zoom, sy=(v.y-viewY())*zoom;
+      if(sx>=0 && sx<=W && sy>=PLAY_TOP && sy<=H) continue;      // 画面内なら波紋で足りる
+      const cx=Math.max(16, Math.min(W-16, sx)), cy=Math.max(PLAY_TOP+16, Math.min(H-16, sy));
+      const ang=Math.atan2(sy-cy, sx-cx);
+      const k=Math.min(1,v.life), pu=0.75+0.25*Math.sin(clock*14);
+      g.save();
+      g.translate(cx,cy); g.rotate(ang);
+      g.globalAlpha=0.95*k*pu;
+      g.fillStyle='#ff8fb4';
+      const r=6.5+3*k;
+      g.beginPath(); g.moveTo(r*1.5,0); g.lineTo(-r*0.7,r*0.9); g.lineTo(-r*0.7,-r*0.9); g.closePath(); g.fill();
+      g.restore();
+      // 印の周りに広がる輪＝「今ここから入った」
+      g.globalAlpha=0.5*k*k;
+      g.beginPath(); g.arc(cx,cy, 10+22*(1-k), 0, 7);
+      g.strokeStyle='#ff8fb4'; g.lineWidth=2*k+0.5; g.stroke();
+      g.globalAlpha=1;
+    }
+    g.restore();
+  }
   if(WARN_OUT>0){
     const near=[];
     for(const f of foes){
@@ -3537,6 +3572,14 @@ function loop(ts){
         g.strokeStyle='rgba(160,255,215,.85)'; g.lineWidth=1.2; g.stroke();
         g.beginPath(); g.arc(mx+head.x*sx, my+(head.y-PLAY_TOP)*sy, 2.2, 0, 7);
         g.fillStyle='#c8ffe6'; g.fill();
+      }
+      // ★外から入ってきた地点を光らせる（盤面のどこで起きたかが地図で分かる）
+      for(const v of invFx){
+        const vx=mx+v.x*sx, vy=my+(v.y-PLAY_TOP)*sy, u=1-v.life;
+        g.beginPath(); g.arc(vx,vy, 2+u*7, 0, 7);
+        g.strokeStyle='rgba(255,150,200,'+(0.95*v.life)+')'; g.lineWidth=1.6*v.life+0.5; g.stroke();
+        g.beginPath(); g.arc(vx,vy, 1.8, 0, 7);
+        g.fillStyle='rgba(255,210,235,'+(0.95*v.life)+')'; g.fill();
       }
       // 今見えている範囲
       g.strokeStyle='rgba(200,255,230,.4)'; g.lineWidth=1;
