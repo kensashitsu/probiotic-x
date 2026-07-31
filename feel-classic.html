@@ -275,7 +275,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v125 (07-31 13:30)';
+const BUILD='v126 (07-31 13:52)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -492,6 +492,8 @@ let burnFx=0;        // 今の消費がオーラ由来か（表示の色分け�
 // ★中和の音は、同時に鳴る「鎖が砕ける音」「弾かれた音」に埋もれて聞こえなかった。
 //   中和した回は他を黙らせて、その音だけを立てる
 let crackMute=false;
+// 封印の中心。使い切った菌が「酸になって輪へ注がれる」向きを決めるのに使う
+const sealFx={x:0,y:0,on:false};
 let burnSeen=false;  // 燃焼の説明を出したか
 let ammoFlash=0;     // 弾薬が減った合図（指先のバッジを光らせる）
 const SOS_T=+(_q.get('sos')||3.2);        // 弾け飛んだ球菌が繋がり直せる猶予(秒)
@@ -1495,9 +1497,13 @@ function doSeal(poly){
   // ★★代金は「囲んだ面積」＋「溶かした匹数」。面積だけだと、密度を上げた瞬間に
   //   同じ輪でより多くの敵が獲れて【値段は据え置きのまま報酬だけ1.4倍】になる（v116で完封できた原因）。
   //   匹数ぶんも取れば、密度をいくら変えても収支が動かない
+  {  // 酸の滴の行き先＝囲った輪の中心
+    let sx=0, sy=0; for(const q of poly){ sx+=q.x; sy+=q.y; }
+    sealFx.x=sx/poly.length; sealFx.y=sy/poly.length; sealFx.on=true;
+  }
   if(shrunk>0 && sealed===0) crackMute=true;    // 中和の音を立たせる
   if(sealed>0||shrunk>0) spendChain(sealCost(poly, sealed));
-  crackMute=false;
+  crackMute=false; sealFx.on=false;
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
@@ -1596,7 +1602,15 @@ function spendChain(n){
     shatterBits(r.x,r.y,r.ang);
     joinedCount--;
   }
-  if(cost>0){ if(!crackMute) crackSnd(); ammoFlash=1; }
+  if(cost>0){
+    if(!crackMute) crackSnd();
+    ammoFlash=1;
+    // ★数字は封印ごとに1つ。菌ごとに出すと「−1」が画面を埋める（実測：代金7で7個）
+    if(!burnFx){
+      const tx=sealFx.on? sealFx.x : head.x, ty=sealFx.on? sealFx.y : head.y;
+      bits.push({x:tx, y:ty-22, vx:0, vy:-0.6, life:1.4, r:1, txt:'-'+cost});
+    }
+  }
   // ★燃えた分は尻尾で消える＝画面外になりがちなので、指の斜め上にも青い「−1」を出す
   //   （指の真下は指で隠れて見えない）。あわせてHUDの「鎖」を青く弾かせる
   if(cost>0 && burnFx && dragging)
@@ -1644,18 +1658,21 @@ function dropTail(burn){
     tipMsg('鎖は'+WEAR_FREE+'匹までしか保てない ─ それ以上は尻尾から酸切れで離れる'); }
 }
 // 砕ける破片（丸い粒ではなく、割れた棒切れに見せる）
+// ★v126：白い破片は「何が飛び散っているのか分からない」と言われた。
+//   実際に起きているのは【使い切った乳酸菌が酸に変わって、囲った輪へ注がれる】こと。
+//   なので破片ではなく【酸の色（ミント）の滴が、封印の中心へ吸い込まれていく】形にする。
+//   敵が溶けた時のミント粒とは動きで区別できる（あちらは外へ弾ける／こちらは輪へ集まる）
 function shatterBits(x,y,ang){
-  // ★敵が溶けた時（ミントの粒）と混同しないよう、白い破片＋白い衝撃輪＋「−1」の数字で見せる
-  for(let i=0;i<10;i++){
-    const a=rnd(0,6.283), sp=rnd(2.2,6.0);
-    bits.push({x:x+rnd(-2,2), y:y+rnd(-2,2),
-      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-0.8,
-      life:1.6, r:rnd(1.6,3.0), len:rnd(5,11)*SCALE, ang:a, spin:rnd(-0.6,0.6), white:1});
+  const on=sealFx.on, tx=sealFx.x, ty=sealFx.y;
+  for(let i=0;i<7;i++){
+    // 封印の最中なら輪の中心へ、それ以外（オーラ等）は上へ立ちのぼる
+    const a=on? Math.atan2(ty-y,tx-x)+rnd(-0.45,0.45) : -Math.PI/2+rnd(-0.9,0.9);
+    const sp=on? rnd(2.6,5.4) : rnd(1.4,3.0);
+    bits.push({x:x+rnd(-3,3), y:y+rnd(-3,3),
+      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+      life:1.0, r:rnd(1.5,3.2), acid:1, drift:on?1:0});
   }
-  bits.push({x:x, y:y, life:1.2, r:1, flash:1});
-  // ★オーラで燃えた分は青い「−1」にする。溶かして払った分（白）と区別が付き、
-  //   「走っているだけで弾薬が減っている」が読めるようになる
-  bits.push({x:x, y:y-6, vx:0, vy:-0.55, life:1.5, r:1, txt:'-1', col:burnFx?'burn':null});
+  bits.push({x:x, y:y, life:1.0, r:1, flash:1, acid:1});
 }
 // ★分裂の合図。「敵も味方もいつ増えたのか全く分からない」＝このゲームの勝敗そのものが
 //   見えていなかった。輪＋割れた向きの光条＋「＋1」で知らせる。
@@ -3150,9 +3167,11 @@ function loop(ts){
 
   // 溶けカス
   for(const b of bits){ b.x+=b.vx; b.y+=b.vy;
-    if(!b.txt) b.vy+=0.06;
+    if(!b.txt && !b.acid) b.vy+=0.06;
+    // 酸の滴は落ちない（輪へ吸い込まれる／立ちのぼる）。減速して溶け込むように消える
+    if(b.acid){ b.vx*=0.90; b.vy*=0.90; }
     if(b.len||b.flash||b.txt){ b.vx*=0.96; b.vy*=0.96; }
-    b.life-=dt*(b.txt?1.1:(b.len?1.0:1.6));
+    b.life-=dt*(b.txt?1.1:(b.len?1.0:(b.acid?1.3:1.6)));
     if(b.life<=0) continue;
     if(b.txt){                                // 「−1」＝弾薬を1つ失った／「＋1」＝分裂で増えた
       const k=Math.min(1,b.life);
@@ -3168,12 +3187,14 @@ function loop(ts){
       g.fillText(b.txt,b.x,b.y);
       g.restore(); continue;
     }
-    if(b.flash){                              // 砕けた瞬間の白い衝撃輪
+    if(b.flash){                              // 使い切った瞬間の輪（酸の色）
       const k=Math.min(1,b.life), t=1-k;
-      g.beginPath(); g.arc(b.x,b.y,t*46+4,0,7);
-      g.strokeStyle='rgba(255,255,255,'+(0.85*k*k)+')'; g.lineWidth=1+5*k; g.stroke();
-      g.beginPath(); g.arc(b.x,b.y,t*26+2,0,7);
-      g.strokeStyle='rgba(190,240,255,'+(0.5*k)+')'; g.lineWidth=1+3*k; g.stroke();
+      g.beginPath(); g.arc(b.x,b.y,t*40+4,0,7);
+      g.strokeStyle= b.acid? 'rgba(150,255,210,'+(0.85*k*k)+')' : 'rgba(255,255,255,'+(0.85*k*k)+')';
+      g.lineWidth=1+5*k; g.stroke();
+      g.beginPath(); g.arc(b.x,b.y,t*24+2,0,7);
+      g.strokeStyle= b.acid? 'rgba(220,255,240,'+(0.5*k)+')' : 'rgba(190,240,255,'+(0.5*k)+')';
+      g.lineWidth=1+3*k; g.stroke();
       continue;
     }
     if(b.len){                                // 割れた棒切れ
@@ -3182,6 +3203,18 @@ function loop(ts){
       g.strokeStyle='rgba(255,255,255,'+(0.95*Math.min(1,b.life))+')';
       g.lineWidth=Math.max(1.2,b.r*Math.min(1,b.life)); g.lineCap='round';
       g.beginPath(); g.moveTo(-b.len/2,0); g.lineTo(b.len/2,0); g.stroke();
+      g.restore(); continue;
+    }
+    if(b.acid){
+      // ★使い切った乳酸菌＝酸そのもの。光る滴にして「酸が輪へ注がれた」と読ませる
+      const k=Math.min(1,b.life);
+      g.save();
+      g.shadowColor='rgba(140,255,205,'+(0.9*k)+')'; g.shadowBlur=9;
+      g.beginPath(); g.arc(b.x,b.y,b.r*(0.55+0.45*k),0,7);
+      g.fillStyle='rgba(190,255,225,'+(0.92*k)+')'; g.fill();
+      g.shadowBlur=0;
+      g.beginPath(); g.arc(b.x-b.r*0.25,b.y-b.r*0.25,b.r*0.35*k,0,7);
+      g.fillStyle='rgba(255,255,255,'+(0.7*k)+')'; g.fill();   // つや＝液体らしさ
       g.restore(); continue;
     }
     g.beginPath(); g.arc(b.x,b.y,b.r*b.life,0,7);
