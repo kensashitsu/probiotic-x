@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <meta name="theme-color" content="#0b0f14">
 <link rel="manifest" href="manifest.json">
-<title>プロバイオティＸ ─ ぬか床を守れ</title>
+<title>プロバイオティＸ ─ 発酵か、腐敗か</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   html,body{width:100%;height:100%;overflow:hidden;background:#0b0f14;
@@ -103,6 +103,7 @@
   #ready .rs{font-size:13.5px;color:#9fb3ac;margin-top:16px;line-height:1.95}
   #ready .rs b{color:#dff7ec}
   #ready .rs b.hot{color:#8ff0c0}
+  #ready .rs b.rot{color:#f0a8c0}   /* 腐敗側は桃色＝盤面の敵と同じ色 */
   #ready .btns{display:flex;gap:12px;margin-top:22px}
   /* 前2作と同じ立体ボタン。主役＝はじめる／控え＝あそびかた */
   #go,#howto{font:inherit;font-size:16px;font-weight:800;border-radius:999px;padding:13px 26px;
@@ -201,11 +202,11 @@
   <div id="bar">
     <div id="barL"></div>
     <div id="barMid"></div>
-    <div class="cap cl">乳酸</div><div class="cap cr">腐敗</div>
+    <div class="cap cl">発酵</div><div class="cap cr">腐敗</div>
     <div id="pcL">50%</div><div id="pcR">50%</div>
   </div>
   <div id="nums">
-    <span class="foodname" id="foodname">ぬか床</span>
+    <span class="foodname" id="foodname">新鮮</span>
     <span class="tm">残り <b id="tleft">60</b></span>
     <span class="s1" id="allybox">乳酸菌 <b id="nAlly">0</b></span>
     <span class="s2" id="foebox">腐敗菌 <b id="nFoe">0</b></span>
@@ -246,8 +247,9 @@
     </svg>
   </div>
   <div class="rt">プロバイオティ<span class="x">Ｘ</span></div>
-  <div class="rsub">ぬか床を守れ</div>
-  <div class="rs"><b>乳酸菌</b>を なぞって繋ぎ、<br>
+  <div class="rsub">発酵か、腐敗か。</div>
+  <div class="rs">ひとつの食べものを、<b class="hot">発酵</b>と<b class="rot">腐敗</b>が奪い合っている。<br>
+  <b>乳酸菌</b>を なぞって繋ぎ、<br>
   <b>腐敗菌</b>を <b class="hot">輪で囲んで溶かす</b>。<br>
   60秒後に <b>数の多い方が勝ち</b>。</div>
   <div class="btns">
@@ -281,7 +283,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v132 (07-31 15:01)';
+const BUILD='v133 (07-31 15:12)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -302,6 +304,7 @@ const elTime=document.getElementById('tleft');
 const elChain=document.getElementById('nChain'), elChainBox=document.getElementById('chainbox');
 const elAllyBox=document.getElementById('allybox');
 const elFoeBox=document.getElementById('foebox');
+const elFood=document.getElementById('foodname'); let _foodShown='';
 const elOver=document.getElementById('over'), elOverT=document.getElementById('overTtl'),
       elOverS=document.getElementById('overSub');
 let W,H,DPR,portrait=false;
@@ -540,7 +543,7 @@ const FOES_REF=+(new URLSearchParams(location.search).get('foes')||10);
 
 // ★壁際の菌は回り込めず囲えなかった（実機で指摘）。菌の居場所を盤面より内側にして、
 //   縁に「通路」を作る。これで端の敵にも必ず外側から回り込める。
-//   ぬか床と容器の内壁のすきま、という見立てでもある
+//   食べものと容器の内壁のすきま、という見立てでもある
 const EDGE_M=+(new URLSearchParams(location.search).get('edge')||64);
 // 盤面の上下端はここで一元管理する（HUDとボタンを避ける分だけ空ける）。
 // ★横画面は高さが半分以下になるので、同じ値だと盤面が細い帯になってしまう。
@@ -896,7 +899,7 @@ const ROD_DRIFT=9*SCALE*DRIFT, FOE_DRIFT=11*SCALE*DRIFT;
 // ============================================================
 //  目的：フィールドは「食品」。乳酸と腐敗が1本のゲージで押し合い、
 //  その割合は"生きている乳酸菌の数"と"腐敗菌の数"の比でリアルタイムに動く。
-//  乳酸側がゲージを完全に支配したらクリア＝漬かった。押し切られたら腐った。
+//  乳酸側がゲージを完全に支配したらクリア＝発酵。押し切られたら腐敗。
 //  ※こじつけを避けるため、実際の発酵と同じ「基質の取り合い」にしている：
 //    腐敗菌は自分で増え、増えるたびに近くの乳酸菌を1匹押しのける（場所と栄養を奪う）。
 //    乳酸菌もゆっくり分裂して戻る。倒した数だけ湧き直す旧仕様では敵が永久に減らず、
@@ -1247,7 +1250,7 @@ function spawnFoe(){
 }
 
 // ★v119：初見で完封できてしまう件への答え＝【外から入ってくる】。
-//   ぬか床は密閉された無菌室ではなく、蓋の開け閉めや手から雑菌が入り続ける。
+//   食べものは無菌室ではなく、空気や手から雑菌が入り続ける。
 //   増殖率を上げる案は失敗済み（頭数に比例するので撃破では原理的に追いつけない）。
 //   侵入は【頭数に比例しない一定の流入】なので、腕前で押し切れるが、完封は許さない。
 //   しかも「囲んで溶かす相手が絶えず供給される」＝快感の回数はむしろ増える。
@@ -1609,16 +1612,16 @@ function finishGame(win,how){
     '最長の鎖 <b style="color:'+c+'">'+bestChain+'</b>'+
     '　外から侵入 <b style="color:#e78ab0">'+invTotal+'</b></div>';
   const ratio='<div style="font-size:22px;font-weight:800;line-height:1.2">'+
-    '<span style="color:#8ff0c0">乳酸 '+pc+'%</span>'+
+    '<span style="color:#8ff0c0">発酵 '+pc+'%</span>'+
     '<span style="color:#6f7d84;font-size:15px"> : </span>'+
     '<span style="color:#e78ab0">腐敗 '+(100-pc)+'%</span></div>';
   if(win){
-    elOverT.textContent = how==='ko'? '完封！' : '漬かった！';
+    elOverT.textContent = how==='ko'? '完封！' : '発酵した！';
     elOverT.style.color='#8ff0c0';
     elOverS.innerHTML=ratio+st('#8ff0c0')+
       '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
-      (how==='ko'? '腐敗菌を抑え切った。pHが下がったぬか床は、もう腐りません。'
-                 : '乳酸菌が多いまま60秒を守り切った＝漬かった。')+'</div>';
+      (how==='ko'? '腐敗菌を抑え切った。酸が満ちた食べものは、もう腐りません。'
+                 : '乳酸菌が多いまま守り切った＝発酵の勝ち。')+'</div>';
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
   }else{
     elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
@@ -1739,6 +1742,15 @@ function updateHud(){
   // 残りわずかは金色＝完封が近い合図
   elFoe.style.color = (nf<=10)? '#ffe6a0' : '';
   elFoe.style.textShadow = (nf<=10)? '0 0 8px rgba(255,214,120,.9)' : '';
+  // ★テーマ（発酵か腐敗か）は場所を名指しせず、「この食べものが今どうなっているか」で見せる。
+  //   ゲージと同じ情報だが、％ではなく言葉なので何を奪い合っているのかが伝わる
+  // ※HUDは横1行に詰まっているので4文字まで（長いと「やり直す」がはみ出す）
+  const st = gauge>=0.85? 'よく発酵' : gauge>=0.62? '発酵中'
+           : gauge>=0.42? '新鮮'     : gauge>=0.22? '傷み始め' : '腐りかけ';
+  if(st!==_foodShown){
+    _foodShown=st; elFood.textContent=st;
+    elFood.style.color = gauge>=0.62? '#a8f0cf' : gauge>=0.42? '#cfe8dd' : '#f0a8c0';
+  }
 }
 // 鎖（弾薬）の表示。減った時だけ青く弾ける
 let _chainShown=-1, _chainBurnT=-9;
