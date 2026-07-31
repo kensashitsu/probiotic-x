@@ -123,19 +123,22 @@
   #go:active{transform:translateY(3px);box-shadow:0 2px 0 #2f9c78, 0 6px 14px rgba(0,0,0,.45)}
   #howto{color:#8ff0c0;background:transparent;box-shadow:inset 0 0 0 2px rgba(143,240,192,.6)}
   #howto:active{transform:translateY(2px)}
-  /* あそびかた */
-  #help{position:absolute;inset:0;z-index:14;display:none;align-items:center;justify-content:center;
-    padding:18px;background:rgba(5,10,13,.86)}
-  #help.show{display:flex}
-  #help .hbox{max-width:520px;width:100%;max-height:100%;overflow:auto;
-    background:rgba(10,20,24,.96);border:1px solid #26343c;border-radius:18px;padding:18px 16px 16px;
-    text-align:left}
-  #help .htl{font-size:17px;font-weight:800;color:#8ff0c0;text-align:center;letter-spacing:.08em}
-  #help .hrow{display:flex;gap:9px;margin-top:12px;font-size:12.5px;line-height:1.75;color:#9fb3ac}
-  #help .hrow b{color:#dff7ec}
-  #help .hi{color:#8ff0c0;font-weight:800;flex:none}
-  #helpClose{display:block;margin:16px auto 2px;font:inherit;font-size:14px;font-weight:800;
-    color:#08281e;background:#8ff0c0;border:0;border-radius:999px;padding:10px 26px}
+  /* ★あそびかた＝読み物ではなく、その操作をするまで進めないチュートリアル（前2作と同じ形）。
+     盤面の上に小さな吹き出しを出すだけなので、手は最初から自由に動かせる */
+  #coach{position:absolute;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);
+    z-index:16;display:none;align-items:center;gap:11px;max-width:520px;margin:0 auto;
+    background:rgba(9,18,22,.965);border:1px solid #2f6b58;border-radius:15px;padding:12px 13px;
+    box-shadow:0 10px 28px rgba(0,0,0,.5)}
+  #coach.show{display:flex}
+  #coachtxt{flex:1;font-size:13px;line-height:1.6;color:#bfd6cd;text-align:left}
+  #coachtxt b{color:#8ff0c0;font-weight:800}
+  #coachtxt .no{color:#f0a8c0;font-weight:800}
+  #coachnext{flex:none;font:inherit;font-size:13.5px;font-weight:800;color:#08281e;border:0;
+    border-radius:11px;padding:11px 14px;letter-spacing:.02em;
+    background:linear-gradient(180deg,#9dffd0,#5fd7a6);box-shadow:0 3px 0 #2f9c78}
+  #coachnext:active{transform:translateY(2px);box-shadow:0 1px 0 #2f9c78}
+  #coachnext.off{opacity:.5;pointer-events:none;box-shadow:none;background:#3f5750;color:#9fb3ac}
+  body.short #coach{padding:9px 11px} body.short #coachtxt{font-size:11.5px;line-height:1.5}
   #ready .rn{font-size:11px;color:#5f6f77;margin-top:18px}
   #over .ttl{font-size:27px;font-weight:800;letter-spacing:.04em}
   #over .sub{font-size:13px;color:#9fb3ac;margin-top:10px;line-height:1.9}
@@ -271,19 +274,7 @@
     アドレスバーが消えて画面が広くなります</div>
 </div>
 <!-- あそびかた（体験版は次の課題。まずは読める形で用意する） -->
-<div id="help">
-  <div class="hbox">
-    <div class="htl">あそびかた</div>
-    <div class="hrow"><span class="hi">①</span><span><b>集める</b>　白い<b>乳酸桿菌</b>をなぞると数珠つなぎになる。繋いだ数だけ<b>酸の帯</b>が伸び、大きく囲める</span></div>
-    <div class="hrow"><span class="hi">②</span><span><b>囲む</b>　軌跡で輪を閉じると、中のピンクの<b>腐敗菌</b>が酸で溶ける。使った桿菌は<b>酸に変わって輪へ注がれる</b>（輪の大きさと溶かした数のぶんだけ要る）。溶けた腐敗菌は<b>栄養になって乳酸菌が増える</b></span></div>
-    <div class="hrow"><span class="hi">③</span><span><b>薙ぐ</b>　速く走ると<b>酸のオーラ</b>を纏い、敵の連鎖を弾き飛ばす。纏っている間は<b>拾えない・囲えない</b>。鎖は減るが<b>菌は死なない</b>（少し休むとまた拾える）</span></div>
-    <div class="hrow"><span class="hi">④</span><span><b>避ける</b>　腐敗菌へ触れると<b>鎖の半分がちぎれる</b>（菌は死なず、2.5秒で拾えるようになる）。アンモニアの<b>靄</b>の中では溶かせない——<b>囲うたびに中和されて縮む</b></span></div>
-    <div class="hrow"><span class="hi">⑤</span><span><b>連続で決める</b>　続けて溶かすと<b>コンボ</b>。<b>8の字</b>で二つまとめて</span></div>
-    <div class="hrow"><span class="hi">⑥</span><span><b>押し返す</b>　腐敗菌は<b>増える上に外からも入ってくる</b>（入られた縁に波紋・ミニマップにも光る）。<b>60秒後に数の多い方が勝ち</b></span></div>
-    <div class="hrow"><span class="hi">⑦</span><span><b>立て直す</b>　ぶつかって散った<b>半透明の仲間</b>は、<b>囲えばその場で立ち直る</b>＝すぐ拾い直せる。酸切れで休んでいる菌も、<b>溶かした輪の中</b>なら立ち直る。<b>掴まれた仲間も囲えば助かる</b></span></div>
-    <button id="helpClose">とじる</button>
-  </div>
-</div>
+<div id="coach"><span id="coachtxt"></span><button id="coachnext">次へ ▶</button></div>
 <div id="over"><div class="ttl" id="overTtl"></div><div class="sub" id="overSub"></div>
   <button id="again">もう一度</button></div>
 <div id="rot"><div class="ri"></div>
@@ -293,7 +284,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v138 (07-31 16:36)';
+const BUILD='v139 (07-31 16:52)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1539,6 +1530,7 @@ function doSeal(poly){
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
   }
   // ★コンボ：演出だけ（弾薬の免除は廃止。無料が挟まると弾薬が減らず一方的になる）
+  if(tutMode && sealed>=2) tutBig++;      // チュートリアル：まとめて溶かした回数
   if(sealed>0){
     combo = (clock-comboT<=COMBO_T)? combo+1 : 1;
     comboT=clock;
@@ -1998,18 +1990,59 @@ function beginMatch(){
     if(e.target.closest && e.target.closest('#howto')) return;
     e.preventDefault(); beginMatch(); },{passive:false});
 });
-// あそびかたの開閉（タイトルの2ボタン構成は前2作に合わせたもの）
-{
-  const hp=document.getElementById('help');
-  const open=(e)=>{ e.preventDefault(); e.stopPropagation(); ac(); hp.classList.add('show'); };
-  const close=(e)=>{ e.preventDefault(); e.stopPropagation(); hp.classList.remove('show'); };
-  ['click','touchend'].forEach(ev=>{
-    document.getElementById('howto').addEventListener(ev,open,{passive:false});
-    document.getElementById('helpClose').addEventListener(ev,close,{passive:false});
-    hp.addEventListener(ev,(e)=>{ if(e.target===hp) close(e); },{passive:false});
-  });
+// ---- あそびかた＝チュートリアル ----
+// 各ステップは「文章」と「達成条件」を持ち、条件を満たすまで『次へ』は押せない＝順番に体験する。
+// tutMode の間は時間も勝敗も動かない（本番のロジックには一切触れない）
+const TUT=[
+  { html:'白いのが<b>乳酸菌</b>、桃色が<span class="no">腐敗菌</span>。この2つが同じ場所を奪い合っているよ。上のバーが<b>今の勢力</b>。', goal:null },
+  { html:'まずは<b>集める</b>。白い乳酸菌を<b>指でなぞる</b>と、数珠つなぎになって付いてくる。<b>3匹</b>つないでみよう！', goal:()=>joinedCount>=3 },
+  { html:'つないだ数だけ<b>酸の帯</b>が伸びる＝<b>大きく囲める</b>。指で<b>輪を閉じて</b>、桃色の腐敗菌を<b>囲んで溶かして</b>みよう！', goal:()=>totalSealed-tutBase.sealed>=1 },
+  { html:'溶かした相手は<b>栄養</b>になって乳酸菌が増える。代金は<b>輪の大きさ＋溶かした数</b>ぶんの鎖なので、<b>2匹以上まとめて</b>囲うほど得だよ。まとめて溶かしてみよう！', goal:()=>tutBig-tutBase.big>=1 },
+  { html:'<b>速く走る</b>と<b>酸のオーラ</b>を纏う。触れた敵の連鎖を弾き飛ばせるけど、纏っている間は<b>拾えない・囲えない</b>。盤面を大きく<b>ひと振り</b>してみよう！', goal:()=>tutAura-tutBase.aura>=1 },
+  { html:'腐敗菌に<b>触れる</b>と鎖の半分がちぎれて散る（菌は死なない）。散った<b>半透明の仲間</b>は、<b>囲えばその場で立ち直る</b>よ。', goal:null },
+  { html:'桃色の<span class="no">靡＝アンモニア</span>の中では溶かせない。<b>囲うたびに中和されて縮む</b>ので、削り切ってから溶かそう。', goal:null },
+  { html:'🎯 本番は<b>60秒</b>。腐敗菌は<b>増える上に外からも入ってくる</b>——終わった時に<b>数の多い方が勝ち</b>だよ。', goal:null },
+];
+let tutMode=false, tutStep=0, tutGoalMet=false, tutBig=0, tutAura=0;
+let tutBase={sealed:0, big:0, aura:0};   // ステップに入った時点の控え（達成はここからの差分で見る）
+const elCoach=document.getElementById('coach'), elCoachTxt=document.getElementById('coachtxt'),
+      elCoachNext=document.getElementById('coachnext');
+function showCoach(){
+  const st=TUT[tutStep], last=tutStep>=TUT.length-1, ready=last||!st.goal||tutGoalMet;
+  elCoachTxt.innerHTML=(tutGoalMet&&st.goal? '✅ <b>できた！</b> ':'')+st.html;
+  elCoachNext.textContent= last? '本番スタート！' : (ready? '次へ ▶' : 'やってみよう…');
+  elCoachNext.classList.toggle('off', !ready);
+  elCoach.classList.add('show');
 }
-document.getElementById('reset').addEventListener('click',()=>{scatter();});
+function tutCheck(){
+  if(!tutMode||tutGoalMet) return;
+  const g=TUT[tutStep].goal;
+  if(g&&g()){ tutGoalMet=true; showCoach(); tutOkSnd(); }
+}
+function coachNext(){
+  const st=TUT[tutStep], last=tutStep>=TUT.length-1;
+  if(!last && st.goal && !tutGoalMet) return;      // 指示をこなすまで進めない
+  if(last){ endTutorial(); return; }
+  tutStep++; tutGoalMet=false; tutBase={sealed:totalSealed, big:tutBig, aura:tutAura}; showCoach();
+}
+function startTutorial(){
+  ac(); firstStart=false; tutMode=true; tutStep=0; tutGoalMet=false; tutBig=0; tutAura=0;
+  document.getElementById('ready').classList.add('hide');
+  scatter(); phase='play'; playT=0;
+  tutBase={sealed:totalSealed, big:tutBig, aura:tutAura};
+  showCoach();
+}
+function endTutorial(){
+  tutMode=false; elCoach.classList.remove('show');
+  scatter(); phase='play'; playT=0;
+}
+['click','touchend'].forEach(ev=>{
+  document.getElementById('howto').addEventListener(ev,(e)=>{
+    e.preventDefault(); e.stopPropagation(); startTutorial(); },{passive:false});
+  elCoachNext.addEventListener(ev,(e)=>{ e.preventDefault(); e.stopPropagation(); coachNext(); },{passive:false});
+});
+// 「やり直す」はチュートリアルの抜け道も兼ねる（途中で本番へ）
+document.getElementById('reset').addEventListener('click',()=>{ if(tutMode) endTutorial(); else scatter(); });
 // ★音のオン/オフ。押すと切り替わり、記憶される。
 //   オンにした時は1音鳴らして「今どっちか」を耳でも確認できるようにする
 const elSnd=document.getElementById('sndbtn');
@@ -2307,6 +2340,16 @@ function clearSnd(){ if(!A||muted)return; try{
   sndPlays++;
 }catch(e){} }
 // ラスト5秒の「チッ」。短い高域ノイズ＋薄い高音サイン（Ｙーストと同じ考え方）
+// チュートリアルの「できた！」＝2音の短いチャイム（前2作と同じ作り）
+function tutOkSnd(){ if(!A||muted)return; try{
+  const t=A.currentTime, o=A.createOscillator(), g=A.createGain();
+  o.type='triangle';
+  o.frequency.setValueAtTime(660,t); o.frequency.setValueAtTime(990,t+0.09);
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(0.11,t+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.32);
+  o.connect(g).connect(A.destination); o.start(t); o.stop(t+0.34);
+}catch(e){} }
 function tickSnd(n){ if(!A||muted)return; try{
   const t=A.currentTime;
   const len=Math.max(4,Math.floor(A.sampleRate*0.009));
@@ -2747,7 +2790,7 @@ function loop(ts){
       wearAcc += CHAIN_WEAR*over*dt;
       while(wearAcc>=1 && joinedCount>WEAR_FREE){ wearAcc-=1; dropTail(); updateChain(false); }
     } else wearAcc=0;
-    if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0;
+    if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0; tutAura++;
       // 点火代も「消耗して戻る」＝頭数は減らさない
       if(AURA_IGNITE>0 && joinedCount>0 && clock-igniteT>IGNITE_CD){
         igniteT=clock; for(let i=0;i<AURA_IGNITE && joinedCount>0;i++) dropTail(true); } }
@@ -2762,7 +2805,7 @@ function loop(ts){
 
   // ---- 勢力の増減（食品という限られた場所の取り合い）----
   if(phase==='play'){
-    playT+=dt;
+    if(!tutMode) playT+=dt;   // ★チュートリアル中は時間が進まない
     const nF=livingFoes(), nA=livingRods();
     const cap=capCount();
     const room=Math.max(0, 1-(nA+nF)/cap);      // 食品に残っている余地
@@ -2807,7 +2850,7 @@ function loop(ts){
 
     // ①' 外から入ってくる（時間とともに増える波）。頭数に比例しないので押し返せる
     if(INVADE>0){
-      invAcc += INVADE*(0.4+1.2*Math.min(1,playT/TIME_LIMIT))*dt;
+      if(!tutMode) invAcc += INVADE*(0.4+1.2*Math.min(1,playT/TIME_LIMIT))*dt;   // ★チュートリアル中は入ってこない
       while(invAcc>=1){ invAcc-=1; spawnInvader(); }
     }
     // ② アンモニアの靄を噴く
@@ -2875,10 +2918,13 @@ function loop(ts){
     const left=Math.max(0,TIME_LIMIT-playT);
     elTime.textContent=Math.ceil(left);
     elTm.classList.toggle('hot', left<=10);   // 見た目はCSS側（赤く点って脈打つ）
-    if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
-    else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
-    else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
+    if(!tutMode){                       // ★チュートリアル中は勝敗が付かない
+      if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
+      else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
+      else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
+    }
     updateHud();
+    if(tutMode) tutCheck();
   }
 
   if(phase==='play') tickGrabs(dt);      // 掴まれている乳酸菌の進行
@@ -3751,7 +3797,9 @@ function loop(ts){
 resize(); scatter(); requestAnimationFrame(loop);
 window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals,path:()=>path,hitMode:()=>HIT_MODE,
   head:()=>head, cam:()=>cam, zoom:()=>zoom, straight:()=>straight, turn:()=>turnRate, camVel:()=>camVel, world:()=>({w:worldW(),top:PLAY_TOP,bot:worldBot(),k:WORLD}),
-  bounds:()=>({top:PLAY_TOP,bot:playBot()})};
+  bounds:()=>({top:PLAY_TOP,bot:playBot()}),
+  tut:()=>({mode:tutMode,step:tutStep,met:tutGoalMet,big:tutBig,aura:tutAura}),
+  tutSkip:()=>{ tutGoalMet=true; showCoach(); }};
 </script>
 </body>
 </html>
