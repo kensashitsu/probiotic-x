@@ -68,9 +68,16 @@
      左右のグループを同じ重み（flex:1）にすると、中身の幅が変わっても中央がずれない */
   #nums .grp{flex:1;display:flex;align-items:center;gap:9px;min-width:0}
   #nums .gR{justify-content:flex-end}
-  #nums .tm{flex:0 0 auto;padding:0 2px}
-  #nums .tm b{font-size:20px;line-height:1;color:#dff7ec;letter-spacing:.02em;
-    text-shadow:0 0 10px rgba(140,240,200,.35)}
+  #nums .tm{flex:0 0 auto;padding:1px 13px;border-radius:999px;
+    background:rgba(200,245,225,.07);border:1px solid rgba(190,240,215,.22);
+    transition:background .2s,border-color .2s}
+  #nums .tm b{font-size:23px;line-height:1.05;color:#ffffff;letter-spacing:.02em;
+    text-shadow:0 0 12px rgba(190,255,225,.45)}
+  /* 残り10秒からは赤く点る＝終わりが近いのが目の端で分かる */
+  #nums .tm.hot{background:rgba(255,120,90,.18);border-color:rgba(255,150,120,.55)}
+  #nums .tm.hot b{color:#ffb9a6;text-shadow:0 0 14px rgba(255,140,110,.85)}
+  #nums .tm.hot{animation:tmp 1s ease-in-out infinite}
+  @keyframes tmp{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
   #reset{pointer-events:auto;font:inherit;font-size:10.5px;font-weight:700;color:#9fb3ac;
     background:rgba(255,255,255,.07);border:0;border-radius:999px;padding:4px 10px}
   /* 音が出ているか自分で確かめられるボタン。消音中は赤くして「今どっちか」を出す */
@@ -79,9 +86,6 @@
   #sndbtn.off{background:rgba(255,120,90,.22);color:#ffb0a0}
   #sndbtn.wait{opacity:.55}
   body.short #sndbtn{font-size:11px;padding:3px 7px}
-  #tip{position:absolute;top:calc(env(safe-area-inset-top) + 66px);left:0;right:0;text-align:center;
-    font-size:12px;line-height:1.5;color:#6f7d84;padding:0 14px;
-    z-index:5;pointer-events:none;transition:opacity .4s}
   /* 決着 */
   #over{position:absolute;left:24px;right:24px;top:30%;z-index:9;text-align:center;
     background:rgba(7,12,15,.93);border:1px solid #26343c;border-radius:18px;padding:24px 18px;
@@ -167,7 +171,6 @@
     #hud{top:calc(env(safe-area-inset-top) + 6px);
       left:calc(env(safe-area-inset-left) + 14px);right:calc(env(safe-area-inset-right) + 14px)}
     #bar{height:20px} #bar .cap{font-size:10px}
-    #tip{top:calc(env(safe-area-inset-top) + 54px);font-size:11.5px}
     #ready .rt{font-size:24px;margin-top:8px} #ready .rs{font-size:12px;margin-top:9px;line-height:1.7}
     #ready .mascot{width:104px} #ready .rsub{font-size:11.5px;margin-top:4px} #ready .btns{margin-top:14px}
     #go{margin-top:15px;padding:11px 30px} #ready .rn{margin-top:10px}
@@ -178,10 +181,10 @@
   body.short #bar{height:17px}
   body.short #bar .cap,body.short #pcL,body.short #pcR{font-size:9.5px}
   body.short #nums{margin-top:3px;font-size:10px;gap:7px}
-  body.short #nums b{font-size:11px} body.short #nums .tm b{font-size:17px}
+  body.short #nums b{font-size:11px} body.short #nums .tm b{font-size:19px}
+  body.short #nums .tm{padding:0 10px}
   body.short #nums .grp{gap:7px}
   body.short #reset{font-size:9.5px;padding:3px 8px}
-  body.short #tip{top:calc(env(safe-area-inset-top) + 42px);font-size:10.5px}
   body.short #ready .mascot{width:78px}
   body.short #ready .rsub{font-size:10.5px}
   body.short #ready .rt{font-size:21px;margin-top:6px}
@@ -194,7 +197,6 @@
     #nums{gap:8px}
     #nums .grp{gap:8px}
     #nums *{white-space:nowrap}
-    #nums .s3{display:none}
   }
   /* ホーム画面に追加すればバーごと消える。スタンドアロン起動中は出さない */
   #a2hs{display:none} body.nostandalone #a2hs{display:block}
@@ -218,13 +220,11 @@
     </span>
     <span class="tm"><b id="tleft">60</b></span>
     <span class="grp gR">
-      <span class="s3">溶かした <b id="cnt">0</b></span>
       <button id="sndbtn" title="テスト音">🔊</button>
       <button id="reset">やり直す</button>
     </span>
   </div>
 </div>
-<div id="tip">なぞって乳酸菌を繋ぐほど酸の帯が伸び、大きく囲める ─ 囲えば溶ける／触れれば弾ける</div>
 <div id="ready">
   <!-- ★マスコット：乳酸桿菌。前2作（六角の酵素／酵母の細胞）と同じ「顔つきの主役」。
        小さい子がくっついているのは、二分裂して連なるという芯を一目で見せるため。
@@ -291,7 +291,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v135 (07-31 15:29)';
+const BUILD='v136 (07-31 15:42)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -304,7 +304,8 @@ try{
   ve.addEventListener('mousedown',tap);
 }catch(e){}
 const cv=document.getElementById('cv'), g=cv.getContext('2d');
-const elCnt=document.getElementById('cnt');
+const elCnt=document.getElementById('cnt');   // ★HUDからは外したので無い（決着画面で出す）
+const elTm=document.querySelector('#nums .tm');
 const elAlly=document.getElementById('nAlly'), elFoe=document.getElementById('nFoe');
 const elBarL=document.getElementById('barL'), elBarMid=document.getElementById('barMid');
 const elPcL=document.getElementById('pcL'), elPcR=document.getElementById('pcR');
@@ -1049,7 +1050,6 @@ function scatter(){
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; reviveSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; foeAlert=0; cdLast=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
-  document.getElementById('tip').style.opacity=1;
   updateHud(); updateBar();
 }
 // ★開始時に全部が単体だと「分裂して連なる」という姿が伝わらないので、
@@ -1777,9 +1777,11 @@ function divFx(x,y,ang,good){
     bits.push({x, y:y-10, vx:0, vy:-0.62, life:1.35, r:1, txt:'＋1', col:good?'mint':'foe'});
   }
 }
-function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
+// ★実況メッセージは廃止（プレイ中に読む余裕はない・ユーザー指示）。
+//   呼び出しは各所に残っているので、ここで受け止めて何もしない
+function tipMsg(t){}
 function updateHud(){
-  elCnt.textContent=totalSealed;
+  if(elCnt) elCnt.textContent=totalSealed;
   const nf=livingFoes();
   elAlly.textContent=livingRods(); elFoe.textContent=nf;
   // 残りわずかは金色＝完封が近い合図
@@ -2870,8 +2872,7 @@ function loop(ts){
     else if(elFoeBox.classList.contains('inv')) elFoeBox.classList.remove('inv');
     const left=Math.max(0,TIME_LIMIT-playT);
     elTime.textContent=Math.ceil(left);
-    elTime.style.color= left<=10? '#ff9a80' : '#dff7ec';
-    elTime.style.textShadow= left<=10? '0 0 12px rgba(255,140,110,.75)' : '0 0 10px rgba(140,240,200,.35)';
+    elTm.classList.toggle('hot', left<=10);   // 見た目はCSS側（赤く点って脈打つ）
     if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
     else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
     else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
