@@ -289,7 +289,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v143 (08-01 10:10)';
+const BUILD='v144 (08-01 11:05)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1699,7 +1699,7 @@ function finishGame(win,how){
     '<span style="color:#6f7d84;font-size:15px"> : </span>'+
     '<span style="color:#e78ab0">腐敗 '+pcTxt(100-pc)+'%</span></div>';
   if(win){
-    elOverT.textContent = how==='ko'? '完封！' : '発酵した！';
+    elOverT.textContent = how==='ko'? '完封！' : '発酵で押し勝った！';
     elOverT.style.color='#8ff0c0';
     elOverS.innerHTML=ratio+st('#8ff0c0')+
       '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
@@ -1707,7 +1707,7 @@ function finishGame(win,how){
                  : '乳酸菌が多いまま守り切った＝発酵の勝ち。')+'</div>'+rank;
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
   }else{
-    elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
+    elOverT.textContent = how==='ko'? '腐ってしまった…' : '腐敗に押し負けた…';
     elOverT.style.color='#ff9a80';
     elOverS.innerHTML=ratio+st('#ffb9a6')+
       '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
@@ -2083,7 +2083,25 @@ function coachNext(){
   const st=TUT[tutStep], last=tutStep>=TUT.length-1;
   if(!last && st.goal && !tutGoalMet) return;      // 指示をこなすまで進めない
   if(last){ endTutorial(); return; }
-  tutStep++; tutGoalMet=false; tutBase={sealed:totalSealed, big:tutBig, aura:tutAura}; showCoach();
+  tutStep++; tutGoalMet=false; tutBase={sealed:totalSealed, big:tutBig, aura:tutAura};
+  tutStage();
+  showCoach();
+}
+// ★チュートリアル中は盤面が自分では動かない（増殖も靄の発生も止めた）ので、
+//   靄を教えるステップでは【その場に1つ置く】。近くに腐敗菌が居る所に出す＝
+//   「中では溶かせない・中の敵が速く増える」がその場で見える
+const TUT_HAZE=6;      // ⑦アンモニアのステップ（0始まり）
+function tutStage(){
+  if(!tutMode) return;
+  if(tutStep===TUT_HAZE && !ammo.length){
+    const c={x:W*0.5/zoom+viewX(), y:(PLAY_TOP+H*0.55)/zoom+viewY()};
+    let best=null, bd=1e9;
+    for(const f of foes){ if(f.dead) continue;
+      const d=Math.hypot(f.x-c.x,f.y-c.y); if(d<bd){ bd=d; best=f; } }
+    const x=best? best.x : c.x, y=best? best.y : c.y;
+    ammo.push({x,y,r:AM_R*0.3,max:AM_R,t:0,life:9999,ph:rnd(0,6.28)});   // 練習用は消えない
+    amSeen=true; hazeSeen=true;   // ここで教えるので、被る案内は出さない
+  }
 }
 function startTutorial(){
   ac(); firstStart=false; tutMode=true; tutStep=0; tutGoalMet=false; tutBig=0; tutAura=0;
@@ -2887,7 +2905,9 @@ function loop(ts){
     const room=Math.max(0, 1-(nA+nF)/cap);      // 食品に残っている余地
 
     // ① 腐敗菌が二分裂する（酸が弱いほど速い）
-    foeAcc += GF*nF*room*foeSuppress()*dt;
+    // ★チュートリアル中は増やさない（v144）。時間・勝敗・侵入は止めていたのに増殖だけ動いていて、
+    //   練習しているだけで盤面が悪くなっていた（実測：30秒で敵138→193・靄6個）
+    if(!tutMode) foeAcc += GF*nF*room*foeSuppress()*dt;
     let dg=0;
     while(foeAcc>=1 && dg++<40){          // 1フレームで処理する上限（保険）
       foeAcc-=1;
@@ -2956,8 +2976,8 @@ function loop(ts){
       if(!tutMode) invAcc += INVADE*(0.4+1.2*Math.min(1,playT/TIME_LIMIT))*dt;   // ★チュートリアル中は入ってこない
       while(invAcc>=1){ invAcc-=1; spawnInvader(); }
     }
-    // ② アンモニアの靄を噴く
-    if(nF>0){
+    // ② アンモニアの靄を噴く（チュートリアル中は自然発生させない＝⑦で1つだけ出す）
+    if(nF>0 && !tutMode){
       amAcc += AM_RATE*(nF/Math.max(1,startCount()))*dt;
       while(amAcc>=1){
         amAcc-=1;
@@ -2968,11 +2988,13 @@ function loop(ts){
       }
     }
     for(let i2=ammo.length-1;i2>=0;i2--){ const a=ammo[i2]; a.t+=dt;
+      // 増えた合図の減衰はここで（描画側でやると画面外の靄が減衰せず、点きっぱなしになる）
+      if(a.brd) a.brd=Math.max(0,a.brd-dt*1.5);
       a.r=(a.max||AM_R)*(0.3+0.7*Math.min(1,a.t/1.2));
       if(a.t>=a.life || (a.max||AM_R)<AM_R*0.22) ammo.splice(i2,1); }
 
     // ③ 乳酸菌も二分裂する（酸が優勢なほど速い）＝知育の芯
-    allyAcc += GA*nA*room*allyBoost()*dt;
+    if(!tutMode) allyAcc += GA*nA*room*allyBoost()*dt;   // 味方側も同じく止める（盤面を動かさない）
     let dg2=0;
     while(allyAcc>=1 && dg2++<40){        // 1フレームで処理する上限（保険）
       allyAcc-=1;
@@ -3208,7 +3230,6 @@ function loop(ts){
     const k=Math.min(1,a.t/0.8)*Math.min(1,(a.life-a.t)/1.8);
     // ★中に腐敗菌が居るほど、靄そのものが紫→桃色に寄って濃くなる（v143）。
     //   「靄の中は敵が速く増える」を数字でなく色で出す＝放っておくと濃くなる場所に見える
-    if(a.brd) a.brd=Math.max(0,a.brd-dt*1.5);
     const boil=Math.min(1,(a.nf||0)/4)*(HAZE_GROW>1?1:0);
     const hot=Math.min(1, boil*0.85+(a.brd||0)*0.5);
     const mix=(c1,c2,al)=>'rgba('+Math.round(c1[0]+(c2[0]-c1[0])*hot)+','
@@ -3850,6 +3871,21 @@ function loop(ts){
       g.fillStyle='rgba(10,16,20,.55)'; g.strokeStyle='rgba(140,240,200,.22)'; g.lineWidth=1;
       g.beginPath(); g.rect(mx,my,mw,mh); g.fill(); g.stroke();
       const sx=mw/worldW(), sy=mh/(worldBot()-PLAY_TOP);
+      // ★アンモニアの靄も地図に出す（v144）。「今どこが手出しできない場所か」＝
+      //   避ける所と、晴らしに行く所が地図だけで決まる。菌の点より下に敷いて邪魔をしない
+      for(const a of ammo){
+        const k=Math.min(1,a.t/0.8)*Math.min(1,(a.life-a.t)/1.8);
+        if(k<=0) continue;
+        const ax=mx+a.x*sx, ay=my+(a.y-PLAY_TOP)*sy, ar=Math.max(2.4, a.r*sx);
+        const hot=Math.min(1, Math.min(1,(a.nf||0)/4)*(HAZE_GROW>1?0.85:0)+(a.brd||0)*0.5);
+        const cl=(c1,c2,al)=>'rgba('+Math.round(c1[0]+(c2[0]-c1[0])*hot)+','
+          +Math.round(c1[1]+(c2[1]-c1[1])*hot)+','+Math.round(c1[2]+(c2[2]-c1[2])*hot)+','+al+')';
+        const gr=g.createRadialGradient(ax,ay,0,ax,ay,ar);
+        gr.addColorStop(0,   cl([176,120,246],[248,110,175],(0.50+0.28*hot)*k));
+        gr.addColorStop(0.62,cl([176,120,246],[248,110,175],(0.26+0.22*hot)*k));
+        gr.addColorStop(1,   cl([176,120,246],[248,110,175],0));
+        g.fillStyle=gr; g.beginPath(); g.arc(ax,ay,ar,0,7); g.fill();
+      }
       // 味方（乳酸菌）を先に敷く。どちらが優勢かが地図の色で分かる
       g.fillStyle='rgba(170,240,215,.85)';
       for(const r of rods){ if(r.dying!=null) continue;
@@ -3857,6 +3893,22 @@ function loop(ts){
       g.fillStyle='rgba(232,130,175,.95)';
       for(const f of foes){ if(f.dead) continue;
         g.beginPath(); g.arc(mx+f.x*sx, my+(f.y-PLAY_TOP)*sy, 1.55, 0, 7); g.fill(); }
+      // ★靄の輪郭は菌の点より【上】に描く。下に敷くと点に埋もれて「ただの暗い染み」に見える
+      for(const a of ammo){
+        const k=Math.min(1,a.t/0.8)*Math.min(1,(a.life-a.t)/1.8);
+        if(k<=0) continue;
+        const ax=mx+a.x*sx, ay=my+(a.y-PLAY_TOP)*sy, ar=Math.max(2.4, a.r*sx);
+        const hot=Math.min(1, Math.min(1,(a.nf||0)/4)*(HAZE_GROW>1?0.85:0)+(a.brd||0)*0.5);
+        const cl=(c1,c2,al)=>'rgba('+Math.round(c1[0]+(c2[0]-c1[0])*hot)+','
+          +Math.round(c1[1]+(c2[1]-c1[1])*hot)+','+Math.round(c1[2]+(c2[2]-c1[2])*hot)+','+al+')';
+        g.beginPath(); g.arc(ax,ay,ar*0.94,0,7);
+        g.strokeStyle=cl([214,180,255],[255,150,200],(0.75+0.25*hot)*k);
+        g.lineWidth=1+0.6*hot; g.stroke();
+        if(a.brd>0){                       // 中で増えた瞬間＝地図でも脈打つ
+          g.beginPath(); g.arc(ax,ay,ar*(1+0.55*(1-a.brd)),0,7);
+          g.strokeStyle='rgba(255,150,200,'+(0.95*a.brd)+')'; g.lineWidth=1.6*a.brd+0.4; g.stroke();
+        }
+      }
       // 今なぞっている線
       if(dragging && path.length>1){
         g.beginPath(); g.moveTo(mx+path[0].x*sx, my+(path[0].y-PLAY_TOP)*sy);
