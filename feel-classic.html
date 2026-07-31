@@ -202,7 +202,7 @@
   </div>
   <div id="nums">
     <span class="foodname" id="foodname">ぬか床</span>
-    <span class="tm">残り <b id="tleft">90</b></span>
+    <span class="tm">残り <b id="tleft">60</b></span>
     <span class="s1" id="allybox">乳酸菌 <b id="nAlly">0</b></span>
     <span class="s2">腐敗菌 <b id="nFoe">0</b></span>
     <span class="s4" id="chainbox">鎖 <b id="nChain">0</b></span>
@@ -245,7 +245,7 @@
   <div class="rsub">ぬか床を守れ</div>
   <div class="rs"><b>乳酸菌</b>を なぞって繋ぎ、<br>
   <b>腐敗菌</b>を <b class="hot">輪で囲んで溶かす</b>。<br>
-  90秒後に <b>数の多い方が勝ち</b>。</div>
+  60秒後に <b>数の多い方が勝ち</b>。</div>
   <div class="btns">
     <button id="go">はじめる</button>
     <button id="howto">あそびかた</button>
@@ -275,7 +275,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v121 (07-31 09:35)';
+const BUILD='v122 (07-31 11:09)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -933,7 +933,11 @@ const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
 const WIN_AT=0.94, LOSE_AT=0.06;
 // ★決着画面に出す記録（v120のタイムアタックは却下したが、この内訳は残す）
 let bestCombo=0, bestChain=0;
-const TIME_LIMIT=+(_q.get('time')||90);
+// ★v122：90秒→60秒。90秒だと後半に弾切れを起こしがちだった（実測：残り30秒で鎖が4〜6匹に痩せる）。
+//   原因は時間ではなく「敵が増えるほど、奪われる・靄で拾えない・拾い直す暇が無くなる」の3つだが、
+//   60秒ならその局面に入る前に決着する。1試合1分＝リトライも速い。
+//   ※副作用：腐敗菌の爆発が来る前に終わるので、全体にゲージは甘く出る（放置21%→30%）
+const TIME_LIMIT=+(_q.get('time')||60);
 // ★pHが増殖率に効く。酸性なほど腐敗菌は増えられず乳酸菌は増えやすい（実際の発酵）
 function foeSuppress(){ return 0.6+0.8*(1-gauge); }
 // ★「弾薬が少なくなると起死回生ができず詰む」への手当て。
@@ -1551,7 +1555,7 @@ function finishGame(win,how){
     elOverS.innerHTML=ratio+st('#8ff0c0')+
       '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
       (how==='ko'? '腐敗菌を抑え切った。pHが下がったぬか床は、もう腐りません。'
-                 : '乳酸菌が多いまま90秒を守り切った＝漬かった。')+'</div>';
+                 : '乳酸菌が多いまま60秒を守り切った＝漬かった。')+'</div>';
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
   }else{
     elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
