@@ -289,7 +289,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v141 (07-31 19:05)';
+const BUILD='v142 (07-31 19:40)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -994,6 +994,16 @@ const AM_LIFE=+(_q.get('amlife')||9);  // 靄の寿命(秒)
 //   誘因の側で動かす＝晴らせば弾薬が返ってくる。実際、アンモニアが中和されて
 //   pHが戻った所には乳酸菌が住み直せる、という筋も通る
 const CLEAR_GIFT=+(_q.get('gift')||4);  // 靄1つ晴らすと湧く乳酸菌の数
+// ★A案：靄の中の腐敗菌は増殖が速い（v142・ユーザー指示で試す）。
+//   放置しても損をしない問題への、もう一つの答え＝「晴らすと得」ではなく「放っておくと増える」。
+//   実際、アンモニアで中和されて中性に戻った所は腐敗菌にとって好条件（酸が効かない＝増えられる）。
+//   ★v118の教訓（増殖率を上げて難度を作ると、頭数比例で原理的に追いつかない）があるので、
+//     全体の増殖率は触らず【靄の中に居る間だけ】に限定する＝晴らせば止まる＝腕前で消せる抵抗
+//   ★倍率の上限は実測で決めた（60秒・放置 対 自動プレイのゲージ）：
+//     1.0→35.5 対 38〜42／2.0→34.7 対 38〜49／**3.0→31.3 対 37〜41**／
+//     5.0→25.2 対 27〜28（差が消える）／8.0→23.6 対 16〜20（**放置の方が上＝v118の失敗**）。
+//     3.0までは「放置だけが不利になり、戦えば取り返せる」形が保たれる
+const HAZE_GROW=+(_q.get('hazegrow')||3.0);   // 靄の中の増殖倍率（1で無効）
 const AM_R   =66*SCALE;                // 靄の半径
 let ammo=[], amAcc=0, amSeen=false, divSeen=false, hazeSeen=false, hazeSeen2=false, emptySeen=false;
 function inAmmonia(x,y){
@@ -1008,7 +1018,7 @@ function ammoniaAt(x,y){
   return best;
 }
 let gauge=0.5, phase='ready', playT=0, firstStart=true;
-let foeAcc=0, allyAcc=0;
+let foeAcc=0, allyAcc=0, hazeAcc=0;   // hazeAcc＝靄の中の増殖ぶん（A案・v142）
 // ★ミニマップはタップで開閉できる。閉じている間は小さなつまみだけ残す
 let mapOn = (localStorage.getItem('mapOn')!=='0');
 function mapRect(){
@@ -1053,7 +1063,7 @@ function scatter(){
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; reviveSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; foeAlert=0; cdLast=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
-  foeAcc=0; allyAcc=0;
+  foeAcc=0; allyAcc=0; hazeAcc=0;
   elOver.classList.remove('show');
   updateHud(); updateBar();
 }
@@ -2038,7 +2048,7 @@ const TUT=[
   { html:'溶かした相手は<b>栄養</b>になって乳酸菌が増える。代金は<b>輪の大きさ＋溶かした数</b>ぶんの鎖なので、<b>2匹以上まとめて</b>囲うほど得だよ。まとめて溶かしてみよう！', goal:()=>tutBig-tutBase.big>=1 },
   { html:'<b>速く走る</b>と<b>酸のオーラ</b>を纏う。触れた敵の連鎖を弾き飛ばせるけど、纏っている間は<b>拾えない・囲えない</b>。盤面を大きく<b>ひと振り</b>してみよう！', goal:()=>tutAura-tutBase.aura>=1 },
   { html:'腐敗菌に<b>触れる</b>と鎖の半分がちぎれて散る（菌は死なない）。散った<b>半透明の仲間</b>は、<b>囲えばその場で立ち直る</b>よ。', goal:null },
-  { html:'桃色の<span class="no">靄＝アンモニア</span>の中では溶かせない。<b>囲うたびに中和されて縮む</b>ので、削り切ってから溶かそう。<b>晴らした跡には乳酸菌が戻る</b>よ。', goal:null },
+  { html:'桃色の<span class="no">靄＝アンモニア</span>の中では溶かせない上に、<b>腐敗菌が速く増える</b>。<b>囲うたびに中和されて縮む</b>ので早めに削り切ろう。<b>晴らした跡には乳酸菌が戻る</b>よ。', goal:null },
   { html:'🎯 本番は<b>60秒</b>。腐敗菌は<b>増える上に外からも入ってくる</b>——終わった時に<b>数の多い方が勝ち</b>だよ。', goal:null },
 ];
 let tutMode=false, tutStep=0, tutGoalMet=false, tutBig=0, tutAura=0;
@@ -2885,6 +2895,22 @@ function loop(ts){
       const par=src[(Math.random()*src.length)|0];
       if(par) par.div=0.0001; else break;
     }
+    // ①'' 靄の中の腐敗菌は【そこに居る間だけ】速く増える（A案・v142）。
+    //     全体の増殖率は据え置き＝抵抗は「晴らせば消える」形だけに置く
+    if(HAZE_GROW>1 && ammo.length){
+      const hz=foes.filter(f=>!f.dead && !f.div && inAmmonia(f.x,f.y));
+      if(hz.length){
+        hazeAcc += GF*(HAZE_GROW-1)*hz.length*room*foeSuppress()*dt;
+        let dh=0;
+        while(hazeAcc>=1 && dh++<20){
+          hazeAcc-=1;
+          const par=hz[(Math.random()*hz.length)|0];
+          if(par && !par.div){ par.div=0.0001; } else break;
+        }
+        if(!hazeSeen2 && hz.length>=3){ hazeSeen2=true;
+          tipMsg('靄の中は酸が届かない ─ 腐敗菌が速く増える。早く晴らそう'); }
+      } else hazeAcc=0;
+    } else hazeAcc=0;
     for(const f of foes){
       if(!f.div||f.dead) continue;
       f.div+=dt/DIV_T;
@@ -2927,7 +2953,7 @@ function loop(ts){
         const src=foes.filter(f=>!f.dead);
         const f0=src[(Math.random()*src.length)|0];
         if(f0){ ammo.push({x:f0.x,y:f0.y,r:AM_R*0.3,max:AM_R,t:0,life:AM_LIFE,ph:rnd(0,6.28)});
-          if(!amSeen){ amSeen=true; tipMsg('アンモニアで酸が中和される！ 靄の中では溶かせない'); } }
+          if(!amSeen){ amSeen=true; tipMsg('アンモニアで酸が中和される！ 靄の中では溶かせない・敵が速く増える'); } }
       }
     }
     for(let i2=ammo.length-1;i2>=0;i2--){ const a=ammo[i2]; a.t+=dt;
