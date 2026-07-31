@@ -202,7 +202,7 @@
   </div>
   <div id="nums">
     <span class="foodname" id="foodname">ぬか床</span>
-    <span class="tm">残り <b id="tleft">60</b></span>
+    <span class="tm">残り <b id="tleft">90</b></span>
     <span class="s1" id="allybox">乳酸菌 <b id="nAlly">0</b></span>
     <span class="s2">腐敗菌 <b id="nFoe">0</b></span>
     <span class="s4" id="chainbox">鎖 <b id="nChain">0</b></span>
@@ -245,7 +245,7 @@
   <div class="rsub">ぬか床を守れ</div>
   <div class="rs"><b>乳酸菌</b>を なぞって繋ぎ、<br>
   <b>腐敗菌</b>を <b class="hot">輪で囲んで溶かす</b>。<br>
-  60秒後に <b>数の多い方が勝ち</b>。</div>
+  90秒後に <b>数の多い方が勝ち</b>。</div>
   <div class="btns">
     <button id="go">はじめる</button>
     <button id="howto">あそびかた</button>
@@ -275,7 +275,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v124 (07-31 12:05)';
+const BUILD='v125 (07-31 13:30)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -515,9 +515,11 @@ const N_ABS=+(_q.get('n')||0);
 //   ただし【頭数そのもので判断している定数】だけは density に比例させる必要がある
 //   （奪いの下限・少数時の増殖補正の2つ。下の ALLY_FLOOR / LOW_N を参照）
 const N_REF=+(_q.get('nref')||22);
-// ★v118：密度を上げた（開始138匹）ので、上限もそのまま9倍だと放置時に700匹超になり
-//   フレーム時間が21.7msまで落ちた（実測）。6.5倍＝約900匹で頭打ちにする
-const CAP_K=+(_q.get('cap')||6.5);   // 食品に入りきる総数＝開始数の何倍か
+// ★v125：上限を6.5倍→4倍（開始138匹×4＝552匹）。90秒だと後半が敵の指数増殖に
+//   支配されるため。上限に当たると両陣営とも増殖が止まり、
+//   終盤は【プレイヤーの撃破だけが盤面を動かす】＝腕前が効く時間になる。
+//   （フレーム時間の面でも有利：700匹超で21.7msまで落ちていた）
+const CAP_K=+(_q.get('cap')||4.0);   // 食品に入りきる総数＝開始数の何倍か
 // 敵の密度。狭い画面で通り道が無くなるのが避けられなさの主因なので既定を下げる
 const FOES_REF=+(new URLSearchParams(location.search).get('foes')||10);
 
@@ -939,11 +941,12 @@ const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
 const WIN_AT=0.94, LOSE_AT=0.06;
 // ★決着画面に出す記録（v120のタイムアタックは却下したが、この内訳は残す）
 let bestCombo=0, bestChain=0;
-// ★v122：90秒→60秒。90秒だと後半に弾切れを起こしがちだった（実測：残り30秒で鎖が4〜6匹に痩せる）。
-//   原因は時間ではなく「敵が増えるほど、奪われる・靄で拾えない・拾い直す暇が無くなる」の3つだが、
-//   60秒ならその局面に入る前に決着する。1試合1分＝リトライも速い。
-//   ※副作用：腐敗菌の爆発が来る前に終わるので、全体にゲージは甘く出る（放置21%→30%）
-const TIME_LIMIT=+(_q.get('time')||60);
+// ★v125：90秒に戻す（ユーザー判断）。ただし【総数の上限（CAP_K）を絞るのが前提】。
+//   実測：上限6.5倍のまま90秒にすると、最後の30秒で敵が294→467匹に増えて
+//   後半が増殖に支配され、拾える菌も123→73匹に枯れた（ゲージ16〜18%）。
+//   上限4倍にすると 敵298〜316匹・味方124〜146匹・拾える菌103〜137匹（ゲージ28〜29%）で
+//   最後まで戦える。?time=60 で1分の試合にも戻せる
+const TIME_LIMIT=+(_q.get('time')||90);
 // ★pHが増殖率に効く。酸性なほど腐敗菌は増えられず乳酸菌は増えやすい（実際の発酵）
 function foeSuppress(){ return 0.6+0.8*(1-gauge); }
 // ★「弾薬が少なくなると起死回生ができず詰む」への手当て。
@@ -1567,7 +1570,7 @@ function finishGame(win,how){
     elOverS.innerHTML=ratio+st('#8ff0c0')+
       '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
       (how==='ko'? '腐敗菌を抑え切った。pHが下がったぬか床は、もう腐りません。'
-                 : '乳酸菌が多いまま60秒を守り切った＝漬かった。')+'</div>';
+                 : '乳酸菌が多いまま90秒を守り切った＝漬かった。')+'</div>';
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
   }else{
     elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
