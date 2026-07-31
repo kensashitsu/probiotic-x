@@ -279,7 +279,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v128 (07-31 14:11)';
+const BUILD='v129 (07-31 14:17)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1028,7 +1028,7 @@ function scatter(){
   // ★盤面は画面より広いので、原点(0,0)のままだと必ず左上から始まってしまう。
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; foeAlert=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; reviveSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; foeAlert=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -1091,7 +1091,7 @@ let lunges=[];   // 腐敗菌が乳酸菌を奪う様子（見せるためだけ
 // 攻撃の見せ方。enzyme＝酵素の粒を吹きかけて溶かし栄養を吸う（既定）／beam＝昔の線
 const ATK=(_q.get('atk')||'enzyme');
 const GRAB_VIS=+(_q.get('grabvis')||0.6);   // 画面内の個体をどれだけ優先するか（距離の割引率）
-let _stealTxtT=-9, grabSeen=false, rescueSeen=false, allyHurt=0;
+let _stealTxtT=-9, grabSeen=false, rescueSeen=false, reviveSeen=false, allyHurt=0;
 // ★2度「攻撃に気付けない」と言われた。粒を強くしても駄目だったので、原因を変えた：
 //   奪いが【一瞬で終わる・画面外でも起きる】から見えないのが本体だった。
 //   ① 掴まれてから GRAB_T 秒かけて奪われる（＝気付く時間がある）
@@ -1188,6 +1188,30 @@ function tickGrabs(dt){
       stealSnd();
     }
   }
+}
+// ★v129：休んでいる（半透明の）仲間を、囲った酸で立ち直らせる（ユーザー案）。
+//   ただし【無条件で「囲えば回復」にはしない】——敵のいない空の輪でも回復できると、
+//   酸切れ（3.5秒）やオーラの燃焼の待ち時間も、鎖18匹の上限も、輪を描くだけで無効化できる。
+//   実際に酸が注がれた封印＝【敵を溶かした／靄を中和した輪】の中だけで効かせる。
+//   ＝「大きく囲うほど仲間も元気になる」という良い副作用も付く
+function reviveInside(poly){
+  let n=0;
+  for(const r of rods){
+    if(r.joined || r.dead || r.dying!=null) continue;
+    if(!(r.spent>0)) continue;
+    if(!pointInPoly(r.x,r.y,poly)) continue;
+    r.spent=0; n++;
+    // 立ち直った合図＝ミントの粒が湧き上がる（拾えるようになった、が一目で分かる）
+    for(let i=0;i<6;i++) bits.push({x:r.x,y:r.y, vx:rnd(-.7,.7), vy:rnd(-1.2,-.1),
+      life:.7, r:rnd(1,2.2)});
+    shards.push({x:r.x, y:r.y, life:1, good:true, small:true});
+    if(n>40) break;
+  }
+  if(n>0){
+    if(!reviveSeen){ reviveSeen=true;
+      tipMsg('酸を浴びた仲間は立ち直る ─ 休んでいる菌ごと囲えば、その場で拾えるようになる'); }
+  }
+  return n;
 }
 // 囲って助けた（掴まれている最中の乳酸菌が輪の中にいたら解放）
 function rescueGrabs(poly){
@@ -1489,6 +1513,7 @@ function doSeal(poly){
   if(hazed.length && inView(hazed[0].x,hazed[0].y,30))
     bits.push({x:hazed[0].x, y:hazed[0].y-14, vx:0, vy:-0.45, life:1.35, r:1, txt:'中和', col:'nh3', sm:1});
   if(shrunk>0){
+    if(sealed===0) reviveInside(poly);   // 靄を中和した酸でも立ち直る
     // 中和の音は neutralSnd に一本化（弱い fizz と重ねると濁って何も聞こえない）
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
   }
@@ -1515,6 +1540,7 @@ function doSeal(poly){
     totalSealed+=sealed;
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
     refundAllies(spots);          // 溶けた腐敗菌が栄養になって乳酸菌が増える
+    reviveInside(poly);           // 輪の中で休んでいた仲間は、その酸で立ち直る
     updateHud();
     fizz(sealed, joinedCount);
     // ★溶かした所に乳酸の化学式を出す（アンモニアのNH₃と対になる）。
