@@ -31,6 +31,10 @@
     background:linear-gradient(90deg,rgba(47,156,120,.52),rgba(143,240,192,.58))}
   #barMid{position:absolute;top:-2px;bottom:-2px;left:50%;width:3px;margin-left:-1.5px;
     background:#fff;box-shadow:0 0 8px rgba(255,255,255,.85)}
+  /* ★タイムアタックの目標＝ここまで押し込めば「漬かった」。旗を立てて目的を常に見せる */
+  #barGoal{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;
+    background:repeating-linear-gradient(180deg,#ffe6a0 0 4px,transparent 4px 7px);
+    box-shadow:0 0 7px rgba(255,214,120,.9)}
   #bar .cap{position:absolute;top:0;bottom:0;display:flex;align-items:center;
     font-size:11px;font-weight:800;letter-spacing:.08em}
   /* 透けた分だけ文字が負けるので、白い縁を薄く敷いて読めるようにする */
@@ -202,7 +206,7 @@
   </div>
   <div id="nums">
     <span class="foodname" id="foodname">ぬか床</span>
-    <span class="tm">残り <b id="tleft">90</b></span>
+    <span class="tm">タイム <b id="tleft">0.0</b></span>
     <span class="s1" id="allybox">乳酸菌 <b id="nAlly">0</b></span>
     <span class="s2">腐敗菌 <b id="nFoe">0</b></span>
     <span class="s4" id="chainbox">鎖 <b id="nChain">0</b></span>
@@ -245,7 +249,7 @@
   <div class="rsub">ぬか床を守れ</div>
   <div class="rs"><b>乳酸菌</b>を なぞって繋ぎ、<br>
   <b>腐敗菌</b>を <b class="hot">輪で囲んで溶かす</b>。<br>
-  90秒後に <b>数の多い方が勝ち</b>。</div>
+  <b class="hot">腐敗菌を全滅させる</b>までの <b>タイム</b>を競う。</div>
   <div class="btns">
     <button id="go">はじめる</button>
     <button id="howto">あそびかた</button>
@@ -259,10 +263,11 @@
   <div class="hbox">
     <div class="htl">あそびかた</div>
     <div class="hrow"><span class="hi">①</span><span><b>集める</b>　白い<b>乳酸桿菌</b>をなぞると数珠つなぎになる。繋いだ数だけ<b>酸の帯</b>が伸び、大きく囲める</span></div>
-    <div class="hrow"><span class="hi">②</span><span><b>囲む</b>　軌跡で輪を閉じると、中のピンクの<b>腐敗菌</b>が酸で溶ける。<b>1回の封印で桿菌1匹</b>を使う（砕けて戻らない）</span></div>
+    <div class="hrow"><span class="hi">②</span><span><b>囲む</b>　軌跡で輪を閉じると、中のピンクの<b>腐敗菌</b>が酸で溶ける。<b>輪の大きさと溶かした数</b>のぶんだけ桿菌を使う（砕けて戻らない）。溶けた腐敗菌は<b>栄養になって乳酸菌が増える</b></span></div>
     <div class="hrow"><span class="hi">③</span><span><b>薙ぐ</b>　速く走ると<b>酸のオーラ</b>を纏い、敵の連鎖を弾き飛ばす。纏っている間は<b>拾えない・囲えない</b></span></div>
     <div class="hrow"><span class="hi">④</span><span><b>避ける</b>　止まっている時に腐敗菌へ触れると<b>鎖の半分がちぎれる</b>。アンモニアの<b>靄</b>の中では溶かせない（囲うたびに縮む）</span></div>
-    <div class="hrow"><span class="hi">⑤</span><span><b>連続で決める</b>　続けて溶かすと<b>コンボ</b>になり、2回目以降は桿菌を使わない。<b>8の字</b>で二つまとめて</span></div>
+    <div class="hrow"><span class="hi">⑤</span><span><b>連続で決める</b>　続けて溶かすと<b>コンボ</b>。<b>8の字</b>で二つまとめて</span></div>
+    <div class="hrow"><span class="hi">⑥</span><span><b>急ぐ</b>　<b>腐敗菌を0匹にすれば「漬かった」</b>＝そこまでの<b>タイム</b>が記録。腐敗菌は<b>外からも入ってくる</b>ので、止まると押し返される。残り数はHUDの<b>腐敗菌</b>を見る</span></div>
     <button id="helpClose">とじる</button>
   </div>
 </div>
@@ -275,7 +280,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v119 (07-31 08:36)';
+const BUILD='v120 (07-31 09:19)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -804,6 +809,9 @@ function startCount(){
   return Math.max(12, Math.min(N_MAX, Math.round(N_REF*playArea()/REF_AREA)));
 }
 function capCount(){ return Math.min(CAP_MAX, Math.round(startCount()*CAP_K)); }
+// 腐敗菌だけの上限（開始数の何倍まで増えられるか）
+const FOE_CAP_K=+(_q.get('foecap')||1.7);
+function foeCap(){ return startCount()*FOE_CAP_K; }
 function rodCount(){ return startCount(); }
 function foeCount(){ return startCount(); }
 // ★総数が勝敗そのものになったので、四散のコストが跳ね上がった（1回ぶつかると
@@ -930,8 +938,15 @@ let linkT=0;
 const BUMP_EVERY=0.08;
 let bumpT=0, ringT=0;
 const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
-const WIN_AT=0.94, LOSE_AT=0.06;
-const TIME_LIMIT=+(_q.get('time')||90);
+// ★v120：タイムアタックに一本化。90秒の制限時間は廃止。
+//   ★勝利条件は【腐敗菌を全滅させる】。ゲージ(比率)を目標にすると、味方の増え方にも
+//     依存して進捗が鈍く（実測：自動プレイが300秒かけて73%で頭打ち）、
+//     何をすれば近づくのかも読みにくかった。全滅なら「囲んで溶かす」がそのまま進捗になる。
+//   負けるのは腐り切った時（LOSE_AT）と、時間切れ（TIME_CAP＝諦めの上限）だけ
+const LOSE_AT=0.06;
+const TIME_CAP=+(_q.get('cap2')||300);   // これを超えたら「漬からなかった」
+let bestTime=0, bestCombo=0, bestChain=0;
+try{ bestTime=+(localStorage.getItem('bestTime')||0)||0; }catch(e){}
 // ★pHが増殖率に効く。酸性なほど腐敗菌は増えられず乳酸菌は増えやすい（実際の発酵）
 function foeSuppress(){ return 0.6+0.8*(1-gauge); }
 // ★「弾薬が少なくなると起死回生ができず詰む」への手当て。
@@ -1008,7 +1023,7 @@ function scatter(){
   // ★盤面は画面より広いので、原点(0,0)のままだと必ず左上から始まってしまう。
   //   中央から始める＝どちらへ走っても同じだけ余裕がある
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
-  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
+  ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0;
   elOver.classList.remove('show');
   document.getElementById('tip').style.opacity=1;
@@ -1107,7 +1122,7 @@ function killAllyNear(x,y,R){
 //   実際の発酵でも、死んだ菌体は分解されて他の菌の栄養になる
 // ★回収も「溶かした匹数」に比例するので、密度を上げた分だけ増えていた。
 //   代金（PER_FOE）と合わせて、1匹あたりの収支が密度に依存しないところまで下げる（0.6→0.45）
-const REFUND=+(_q.get('refund')||0.45);   // 腐敗菌1匹あたり何匹の乳酸菌が湧くか
+const REFUND=+(_q.get('refund')||0.6);   // 腐敗菌1匹あたり何匹の乳酸菌が湧くか
 // ★「湧いた菌は9秒 酸を出せない」も試したが、ルールが増えるだけなので廃止（v112）。
 //   弾薬の量は自然増殖（?ga=）だけで調整する＝覚えることを増やさない
 let refAcc=0, refundSeen=false;
@@ -1191,7 +1206,12 @@ function spawnFoe(){
 //   増殖率を上げる案は失敗済み（頭数に比例するので撃破では原理的に追いつけない）。
 //   侵入は【頭数に比例しない一定の流入】なので、腕前で押し切れるが、完封は許さない。
 //   しかも「囲んで溶かす相手が絶えず供給される」＝快感の回数はむしろ増える。
-const INVADE=+(_q.get('inv')||1.0);       // 平均で毎秒この数だけ縁から入ってくる
+// ★タイムアタックでは侵入がそのまま「押し切るまでの時間」を決めるので、
+//   撃破（毎秒1〜3匹）に対して半分以下＝押し返せる量にする
+// ★全滅がゴールになったので、侵入は「クリアまでの時間」を直接決める最重要のつまみ。
+//   実測（自動プレイ）：0.3なら60〜80秒で残り3〜8匹まで追い込める／0.6だと61匹で頭打ち。
+//   人はこの自動プレイより上手いので、間を取って0.45にする
+const INVADE=+(_q.get('inv')||0.45);      // 平均で毎秒この数だけ縁から入ってくる
 let invAcc=0, invSeen=false, invTotal=0;
 let invFx=[];                              // 侵入口の演出 {x,y,life}
 function spawnInvader(){
@@ -1467,6 +1487,7 @@ function doSeal(poly){
   if(sealed>0){
     combo = (clock-comboT<=COMBO_T)? combo+1 : 1;
     comboT=clock;
+    if(combo>bestCombo) bestCombo=combo;      // 決着画面で出す
   }
   // ★★代金は「囲んだ面積」に比例する。小さく囲えば1匹、大きく囲えば数匹。
   //   繋いだ数＝一度に払える面積になり、拾った分がそのまま攻撃力の上限になる＝弾薬が余らない
@@ -1530,23 +1551,40 @@ function finishGame(win,how){
   phase= win? 'win':'lose';
   dragging=false; activeId=null; auraLoopStop();
   const pc=Math.round(gauge*100);
-  elTime.textContent='0';
+  const T=playT.toFixed(1);
+  elTime.textContent=T;
   if(win){
-    elOverT.textContent = how==='ko'? '完封！' : '漬かった！';
+    // ★タイムアタックの決着＝タイムが主役。記録更新はここで一番大きく出す
+    const isBest = (bestTime<=0 || playT<bestTime);
+    if(isBest){ bestTime=playT; try{ localStorage.setItem('bestTime', playT.toFixed(2)); }catch(e){} }
+    elOverT.textContent = '漬かった！';
     elOverT.style.color='#8ff0c0';
-    elOverS.innerHTML='<span style="font-size:19px;color:#8ff0c0;font-weight:800">乳酸 '+pc+'%</span>'+
-      '<span style="color:#6f7d84"> : </span><span style="font-size:19px;color:#e78ab0;font-weight:800">腐敗 '+(100-pc)+'%</span><br>'+
+    elOverS.innerHTML=
+      '<div style="font-size:40px;font-weight:800;color:#8ff0c0;line-height:1.1;'+
+      'font-variant-numeric:tabular-nums">'+T+'<span style="font-size:18px">秒</span></div>'+
+      (isBest? '<div style="font-size:14px;font-weight:800;color:#ffe6a0;margin-top:2px">自己ベスト更新！</div>'
+             : '<div style="font-size:12px;color:#7f8f95;margin-top:2px">自己ベスト '+bestTime.toFixed(1)+'秒</div>')+
+      '<div style="margin-top:9px;font-size:12.5px;color:#9fb3ac;line-height:1.9">'+
       '溶かした腐敗菌 <b style="color:#8ff0c0">'+totalSealed+'</b>'+
-      (how==='ko'? '（時間内に完全支配）':'')+'<br>'+
-      '<span style="color:#6f7d84">乳酸でpHが下がると、腐敗菌は増えられなくなります。</span>';
+      '　最大コンボ <b style="color:#8ff0c0">'+bestCombo+'</b><br>'+
+      '最長の鎖 <b style="color:#8ff0c0">'+bestChain+'</b>'+
+      '　外から侵入 <b style="color:#e78ab0">'+invTotal+'</b></div>'+
+      '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
+      '腐敗菌を一匹残らず溶かした。pHが下がったぬか床は、もう腐りません。'+'</div>';
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
   }else{
-    elOverT.textContent = how==='ko'? '腐ってしまった' : '腐敗に押し負けた';
+    elOverT.textContent = how==='time'? '漬け切れなかった' : '腐ってしまった';
     elOverT.style.color='#ff9a80';
-    elOverS.innerHTML='<span style="font-size:19px;color:#8ff0c0;font-weight:800">乳酸 '+pc+'%</span>'+
-      '<span style="color:#6f7d84"> : </span><span style="font-size:19px;color:#e78ab0;font-weight:800">腐敗 '+(100-pc)+'%</span><br>'+
-      '溶かした腐敗菌 <b style="color:#ffb9a6">'+totalSealed+'</b><br>'+
-      '<span style="color:#6f7d84">腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</span>';
+    elOverS.innerHTML=
+      '<div style="font-size:19px;font-weight:800;color:#e78ab0">腐敗菌 残り '+livingFoes()+'匹'+
+      '<span style="color:#6f7d84;font-size:13px"> ／ 乳酸 '+pc+'%</span></div>'+
+      '<div style="margin-top:8px;font-size:12.5px;color:#9fb3ac;line-height:1.9">'+
+      '経過 <b style="color:#ffb9a6">'+T+'秒</b>'+
+      '　溶かした腐敗菌 <b style="color:#ffb9a6">'+totalSealed+'</b><br>'+
+      '最大コンボ <b style="color:#ffb9a6">'+bestCombo+'</b>'+
+      '　外から侵入 <b style="color:#e78ab0">'+invTotal+'</b></div>'+
+      '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
+      '腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</div>';
   }
   elOver.classList.add('show');
 }
@@ -1633,12 +1671,17 @@ function divFx(x,y,ang,good){
 function tipMsg(t){ const e=document.getElementById('tip'); e.textContent=t; e.style.opacity=1; }
 function updateHud(){
   elCnt.textContent=totalSealed;
-  elAlly.textContent=livingRods(); elFoe.textContent=livingFoes();
+  const nf=livingFoes();
+  elAlly.textContent=livingRods(); elFoe.textContent=nf;
+  // ★残りわずかは金色＝「あと少しで漬かる」。タイムアタックの目標そのものなので目立たせる
+  elFoe.style.color = (nf<=10)? '#ffe6a0' : '';
+  elFoe.style.textShadow = (nf<=10)? '0 0 8px rgba(255,214,120,.9)' : '';
 }
 // 鎖（弾薬）の表示。減った時だけ青く弾ける
 let _chainShown=-1, _chainBurnT=-9;
 function updateChain(burn){
   const n=joinedCount;
+  if(n>bestChain) bestChain=n;                // 決着画面で出す
   if(n!==_chainShown){
     _chainShown=n; elChain.textContent=n;
     // 保てる数を超えたら琥珀色＝「ここから先は抜けていく」
@@ -2585,8 +2628,14 @@ function loop(ts){
     const cap=capCount();
     const room=Math.max(0, 1-(nA+nF)/cap);      // 食品に残っている余地
 
-    // ① 腐敗菌が二分裂する（酸が弱いほど速い）
-    foeAcc += GF*nF*room*foeSuppress()*dt;
+    // ★v120：腐敗菌にも「食品に入りきる上限」を置く。
+    //   増殖は頭数に比例するので、上限が無いと敵400匹＝毎秒3匹増となり、
+    //   プレイヤーの撃破（毎秒1〜3匹）では原理的に追いつけない＝タイムアタックが成立しない。
+    //   上限があると「押し返せる相手」になり、腕前がそのままタイムに出る。
+    //   ※上限を超えて増えるのは【外からの侵入】だけ＝止まると押し返される緊張は残る
+    const foeRoom=Math.max(0, 1-nF/foeCap());
+    // ① 腐敗菌が二分裂する（酸が弱いほど速い・上限に近いほど遅い）
+    foeAcc += GF*nF*room*foeRoom*foeSuppress()*dt;
     let dg=0;
     while(foeAcc>=1 && dg++<40){          // 1フレームで処理する上限（保険）
       foeAcc-=1;
@@ -2625,7 +2674,9 @@ function loop(ts){
 
     // ①' 外から入ってくる（時間とともに増える波）。頭数に比例しないので押し返せる
     if(INVADE>0){
-      invAcc += INVADE*(0.4+1.2*Math.min(1,playT/TIME_LIMIT))*dt;
+      // 90秒かけて上限まで上がる（急がないと押し返しが重くなる）。
+      // 上限を1.6→1.2に下げた：全滅がゴールだと、終盤の流入がそのまま「詰み」になるため
+      invAcc += INVADE*(0.5+0.7*Math.min(1,playT/90))*dt;
       while(invAcc>=1){ invAcc-=1; spawnInvader(); }
     }
     // ② アンモニアの靄を噴く
@@ -2687,12 +2738,14 @@ function loop(ts){
     // 奪われた合図（HUDの「乳酸菌」を一瞬赤くする）
     if(allyHurt>0){ elAllyBox.classList.add('hurt'); allyHurt=Math.max(0,allyHurt-dt*3.2); }
     else if(elAllyBox.classList.contains('hurt')) elAllyBox.classList.remove('hurt');
-    const left=Math.max(0,TIME_LIMIT-playT);
-    elTime.textContent=Math.ceil(left);
-    elTime.style.color= left<=10? '#ff9a80' : '#bfe9d2';
-    if(nF===0 || gauge>=WIN_AT) finishGame(true,'ko');
+    // ★タイムアタック：制限時間ではなく【漬かるまでのタイム】を出す。
+    //   上手くなるほど完封に張り付いて差が出なくなる形（＝抵抗を足し続ける羽目になる）を、
+    //   時計で差が出る形に変えた。抵抗を足さずに天井が消える
+    elTime.textContent=playT.toFixed(1);
+    elTime.style.color= (bestTime>0 && playT>bestTime)? '#ff9a80' : '#bfe9d2';
+    if(nF===0) finishGame(true,'ko');
     else if(nA===0 || gauge<=LOSE_AT) finishGame(false,'ko');
-    else if(playT>=TIME_LIMIT) finishGame(gauge>0.5,'time');
+    else if(playT>=TIME_CAP) finishGame(false,'time');
     updateHud();
   }
 
