@@ -275,7 +275,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v123 (07-31 11:24)';
+const BUILD='v124 (07-31 12:05)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -809,7 +809,12 @@ function foeCount(){ return startCount(); }
 // ★総数が勝敗そのものになったので、四散のコストが跳ね上がった（1回ぶつかると
 //   十数匹が散り、拾い直せないと死ぬ＝人口の1割が消える）。鎖を失う罰だけで十分なので、
 //   救出の猶予を大きく取る。?doom=4.5 で以前の厳しさに戻せる
-const DOOM=+(_q.get('doom')||9);   // 弾け飛んだ菌の餓死までの秒数
+// ★v124：弾け飛んだ菌の餓死は【廃止】。実測で「戦うほど負ける」の最大の原因だった
+//   （?lose=0 で衝突の損失を消すと、味方83→129匹・ゲージ19%→30%＝放置を上回る）。
+//   衝突のたびに頭数が永久に減るので、攻めるほどゲージが下がっていた。
+//   罰は「鎖がちぎれる＋しばらく拾えない」だけにして、菌は死なせない
+const DOOM=+(_q.get('doom')||0);   // 0＝餓死しない（>0にすると昔の餓死タイマー）
+const SCATTER_SPENT=+(_q.get('scatspent')||2.5);  // 散った菌が酸を溜め直すまでの秒数
 const DOOM_WARN=2.6;          // 残りこの秒数で点滅予告
 // ★酸を出した桿菌は消耗する（自家中毒）。封じた匹数だけ鎖から抜けて使用不能になり、
 //   この秒数で回復して再び拾える。-1 にすると永久死（盤面が減り続ける）
@@ -1611,7 +1616,7 @@ const WEAR_FREE=+(_q.get('wearfree')||18);
 const CHAIN_WEAR=+(_q.get('wear')||0.14);   // 超過1匹あたり毎秒この数だけ離れる
 const WEAR_SPENT=+(_q.get('wearspent')||3.5);  // 離れた菌が酸を溜め直すまでの秒数
 let wearAcc=0, wearSeen=false;
-function dropTail(){
+function dropTail(burn){
   const line=rods.filter(r=>r.joined).sort((a,b)=>a.order-b.order);
   const r=line[0];                            // 尻尾から
   if(!r) return;
@@ -1624,6 +1629,14 @@ function dropTail(){
   for(let i=0;i<5;i++) bits.push({x:r.x,y:r.y, vx:rnd(-.8,.8), vy:rnd(-1.0,.2), life:.6, r:rnd(.9,1.8)});
   const rest=rods.filter(x=>x.joined).sort((a,b)=>a.order-b.order);
   orderSeq=0; for(const x of rest) x.order=orderSeq++;
+  if(burn){
+    // オーラで燃えた分は青く見せる（弾薬は減るが、菌は盤面に残って回復する）
+    ammoFlash=1; updateChain(true);
+    if(dragging) bits.push({x:head.x-30, y:head.y-44, vx:-0.3, vy:-0.9, life:1.0, r:1, txt:'-1', col:'burn'});
+    if(!burnSeen){ burnSeen=true;
+      tipMsg('纏うと酸を撒く ─ 鎖は減るが菌は死なない（少し休むとまた拾える）'); }
+    return;
+  }
   if(!wearSeen){ wearSeen=true;
     tipMsg('鎖は'+WEAR_FREE+'匹までしか保てない ─ それ以上は尻尾から酸切れで離れる'); }
 }
@@ -1805,7 +1818,8 @@ function shatter(ox,oy){
       const r=frag[k];
       r.joined=false; r.order=0;
       r.vx=vx+rnd(-1.2,1.2); r.vy=vy+rnd(-1.2,1.2); r.vr=vr;
-      r.doom=DOOM;                    // 餓死タイマー開始（拾えば救出）
+      r.doom=DOOM;                    // 既定は0＝死なない
+      r.spent=Math.max(r.spent||0, SCATTER_SPENT);   // しばらく拾えないのが罰
       // 塊の中では繋がったまま
       r.link=null; r.next=null; r.clen=0;
       if(k>0){ r.link=frag[k-1]; frag[k-1].next=r; r.clen=k; }
@@ -2582,8 +2596,9 @@ function loop(ts){
       auraAcc += auraBurnRate()*dt;
       while(auraAcc>=1 && joinedCount>0){
         auraAcc-=1;
-        burnFx=1;                       // 燃えて減ったことを指先でも見せる
-        spendChain(1);
+        // ★燃えた菌も【死なせない】。酸を出し切って離れるだけ（酸切れと同じ扱い）。
+        //   走り回るほど頭数が減るのでは、快感がそのまま不利になってしまう
+        dropTail(true);
       }
     } else auraAcc=0;
     // ★酸切れ（纏っていなくても常に効く）。溜め込めないが、菌は死なないのでゲージは減らない
@@ -2593,10 +2608,9 @@ function loop(ts){
       while(wearAcc>=1 && joinedCount>WEAR_FREE){ wearAcc-=1; dropTail(); updateChain(false); }
     } else wearAcc=0;
     if(!wasArmed && aura>0.35){ auraOnSnd(); auraLoopStart(); auraFlash=1; auraTail=0;
+      // 点火代も「消耗して戻る」＝頭数は減らさない
       if(AURA_IGNITE>0 && joinedCount>0 && clock-igniteT>IGNITE_CD){
-        igniteT=clock; burnFx=1; spendChain(AURA_IGNITE); }                      // 点火代
-      if(!burnSeen){ burnSeen=true;
-        tipMsg('纏うと乳酸菌を燃やす ─ 鎖が長いほど速く燃える（残りはHUDの「鎖」）'); } }
+        igniteT=clock; for(let i=0;i<AURA_IGNITE && joinedCount>0;i++) dropTail(true); } }
     else if(wasArmed && aura<=0.35){ auraOffSnd(); auraLoopStop(); auraTail=AURA_TAIL; }   // ここから余韻
     if(aura>0.35) auraLoopMod((headSpd-AURA_LO)/Math.max(1,AURA_HI-AURA_LO));
     // 余韻の間は攻撃力は無いが、触れても飛び散らない（＝減速して囲みに入れる）
