@@ -263,10 +263,12 @@
   <div class="hbox">
     <div class="htl">あそびかた</div>
     <div class="hrow"><span class="hi">①</span><span><b>集める</b>　白い<b>乳酸桿菌</b>をなぞると数珠つなぎになる。繋いだ数だけ<b>酸の帯</b>が伸び、大きく囲める</span></div>
-    <div class="hrow"><span class="hi">②</span><span><b>囲む</b>　軌跡で輪を閉じると、中のピンクの<b>腐敗菌</b>が酸で溶ける。<b>1回の封印で桿菌1匹</b>を使う（砕けて戻らない）</span></div>
-    <div class="hrow"><span class="hi">③</span><span><b>薙ぐ</b>　速く走ると<b>酸のオーラ</b>を纏い、敵の連鎖を弾き飛ばす。纏っている間は<b>拾えない・囲えない</b></span></div>
-    <div class="hrow"><span class="hi">④</span><span><b>避ける</b>　止まっている時に腐敗菌へ触れると<b>鎖の半分がちぎれる</b>。アンモニアの<b>靄</b>の中では溶かせない（囲うたびに縮む）</span></div>
-    <div class="hrow"><span class="hi">⑤</span><span><b>連続で決める</b>　続けて溶かすと<b>コンボ</b>になり、2回目以降は桿菌を使わない。<b>8の字</b>で二つまとめて</span></div>
+    <div class="hrow"><span class="hi">②</span><span><b>囲む</b>　軌跡で輪を閉じると、中のピンクの<b>腐敗菌</b>が酸で溶ける。使った桿菌は<b>酸に変わって輪へ注がれる</b>（輪の大きさと溶かした数のぶんだけ要る）。溶けた腐敗菌は<b>栄養になって乳酸菌が増える</b></span></div>
+    <div class="hrow"><span class="hi">③</span><span><b>薙ぐ</b>　速く走ると<b>酸のオーラ</b>を纏い、敵の連鎖を弾き飛ばす。纏っている間は<b>拾えない・囲えない</b>。鎖は減るが<b>菌は死なない</b>（少し休むとまた拾える）</span></div>
+    <div class="hrow"><span class="hi">④</span><span><b>避ける</b>　腐敗菌へ触れると<b>鎖の半分がちぎれる</b>（菌は死なず、2.5秒で拾えるようになる）。アンモニアの<b>靄</b>の中では溶かせない——<b>囲うたびに中和されて縮む</b></span></div>
+    <div class="hrow"><span class="hi">⑤</span><span><b>連続で決める</b>　続けて溶かすと<b>コンボ</b>。<b>8の字</b>で二つまとめて</span></div>
+    <div class="hrow"><span class="hi">⑥</span><span><b>押し返す</b>　腐敗菌は<b>増える上に外からも入ってくる</b>（入られた縁に波紋・ミニマップにも光る）。<b>60秒後に数の多い方が勝ち</b></span></div>
+    <div class="hrow"><span class="hi">⑦</span><span><b>立て直す</b>　ぶつかって散った<b>半透明の仲間</b>は、<b>囲えばその場で立ち直る</b>＝すぐ拾い直せる。酸切れで休んでいる菌も、<b>溶かした輪の中</b>なら立ち直る。<b>掴まれた仲間も囲えば助かる</b></span></div>
     <button id="helpClose">とじる</button>
   </div>
 </div>
@@ -279,7 +281,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v129 (07-31 14:17)';
+const BUILD='v130 (07-31 14:20)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1194,23 +1196,25 @@ function tickGrabs(dt){
 //   酸切れ（3.5秒）やオーラの燃焼の待ち時間も、鎖18匹の上限も、輪を描くだけで無効化できる。
 //   実際に酸が注がれた封印＝【敵を溶かした／靄を中和した輪】の中だけで効かせる。
 //   ＝「大きく囲うほど仲間も元気になる」という良い副作用も付く
-function reviveInside(poly){
+function reviveInside(poly, full){
   let n=0;
   for(const r of rods){
     if(r.joined || r.dead || r.dying!=null) continue;
     if(!(r.spent>0)) continue;
+    // ★ぶつかって散った菌は【無条件で】囲えば立て直せる（衝突の直後に拾い直す手）。
+    //   酸切れ・オーラで休んでいる菌は、実際に酸が注がれた輪＝敵を溶かした／靄を中和した
+    //   輪の中でだけ立ち直る（空の輪で回復できると、待ち時間も鎖の上限も無効化できるため）
+    if(!r.scat && !full) continue;
     if(!pointInPoly(r.x,r.y,poly)) continue;
-    r.spent=0; n++;
+    r.spent=0; r.scat=0; n++;
     // 立ち直った合図＝ミントの粒が湧き上がる（拾えるようになった、が一目で分かる）
     for(let i=0;i<6;i++) bits.push({x:r.x,y:r.y, vx:rnd(-.7,.7), vy:rnd(-1.2,-.1),
       life:.7, r:rnd(1,2.2)});
     shards.push({x:r.x, y:r.y, life:1, good:true, small:true});
     if(n>40) break;
   }
-  if(n>0){
-    if(!reviveSeen){ reviveSeen=true;
-      tipMsg('酸を浴びた仲間は立ち直る ─ 休んでいる菌ごと囲えば、その場で拾えるようになる'); }
-  }
+  if(n>0 && !reviveSeen){ reviveSeen=true;
+    tipMsg('散った仲間は囲えば立て直せる ─ ぶつかった直後は、まとめて囲って拾い直す'); }
   return n;
 }
 // 囲って助けた（掴まれている最中の乳酸菌が輪の中にいたら解放）
@@ -1513,7 +1517,6 @@ function doSeal(poly){
   if(hazed.length && inView(hazed[0].x,hazed[0].y,30))
     bits.push({x:hazed[0].x, y:hazed[0].y-14, vx:0, vy:-0.45, life:1.35, r:1, txt:'中和', col:'nh3', sm:1});
   if(shrunk>0){
-    if(sealed===0) reviveInside(poly);   // 靄を中和した酸でも立ち直る
     // 中和の音は neutralSnd に一本化（弱い fizz と重ねると濁って何も聞こえない）
     if(!hazeSeen){ hazeSeen=true; tipMsg('囲うたびにアンモニアが中和されて縮む ─ 削り切れば溶かせる'); }
   }
@@ -1535,12 +1538,13 @@ function doSeal(poly){
   if(shrunk>0 && sealed===0) crackMute=true;    // 中和の音を立たせる
   if(sealed>0||shrunk>0) spendChain(sealCost(poly, sealed));
   crackMute=false; sealFx.on=false;
+  // ★散った仲間の立て直しは「どんな輪でも」効く。酸切れ等は溶かした輪の中だけ
+  reviveInside(poly, sealed>0||shrunk>0);
   seals.push({poly, life:1, strong:joinedCount, partial:resisted>0&&sealed===0});
   if(sealed>0){
     totalSealed+=sealed;
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
     refundAllies(spots);          // 溶けた腐敗菌が栄養になって乳酸菌が増える
-    reviveInside(poly);           // 輪の中で休んでいた仲間は、その酸で立ち直る
     updateHud();
     fizz(sealed, joinedCount);
     // ★溶かした所に乳酸の化学式を出す（アンモニアのNH₃と対になる）。
@@ -1872,6 +1876,7 @@ function shatter(ox,oy){
       r.vx=vx+rnd(-1.2,1.2); r.vy=vy+rnd(-1.2,1.2); r.vr=vr;
       r.doom=DOOM;                    // 既定は0＝死なない
       r.spent=Math.max(r.spent||0, SCATTER_SPENT);   // しばらく拾えないのが罰
+      r.scat=1;                       // ★ぶつかって散った印。囲えばすぐ立て直せる（下の reviveInside）
       // 塊の中では繋がったまま
       r.link=null; r.next=null; r.clen=0;
       if(k>0){ r.link=frag[k-1]; frag[k-1].next=r; r.clen=k; }
