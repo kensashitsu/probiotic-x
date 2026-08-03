@@ -332,7 +332,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v151 (08-03 14:20)';
+const BUILD='v152 (08-03 14:45)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -4129,7 +4129,10 @@ function loop(ts){
   if(finFx.on){
     finFx.t=Math.min(FIN_T, finFx.t+dt);
     const e=1-Math.pow(1-finFx.t/FIN_T, 2.2);     // 0→1（最初が速い）
-    const top=PLAY_TOP, hh=Math.max(1,H-top);
+    // ★画面いっぱいに掛ける。盤面の内側（PLAY_TOPから下）だけに掛けていたら、
+    //   上のHUDの帯だけ染まらずに取り残されて見えた（実機で指摘）。
+    //   HUDは半透明なので、後ろが染まればHUDごと色が乗る
+    const top=0, hh=H;
     g.save();
     if(finFx.win){
       // 押し合いの境目から左右へ、酸（ミント）が塗り広がる。
