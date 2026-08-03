@@ -294,7 +294,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v145 (08-01 12:10)';
+const BUILD='v146 (08-03 10:30)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1188,7 +1188,7 @@ function killAllyNear(x,y,R){
 const REFUND=+(_q.get('refund')||0.8);   // 腐敗菌1匹あたり何匹の乳酸菌が湧くか
 // ★「湧いた菌は9秒 酸を出せない」も試したが、ルールが増えるだけなので廃止（v112）。
 //   弾薬の量は自然増殖（?ga=）だけで調整する＝覚えることを増やさない
-let refAcc=0, refundSeen=false;
+let refAcc=0, refundSeen=false, refTotal=0;   // refTotal＝回収で湧いた累計（検証用）
 function spawnAllyAt(x,y){
   const ang=Math.random()*Math.PI*2;
   rods.push({x:Math.max(EDGE_M,Math.min(worldW()-EDGE_M,x+rnd(-14,14))),
@@ -1198,10 +1198,20 @@ function spawnAllyAt(x,y){
              wa:Math.random()*6.28, ws:rnd(.55,1.45), spin:rnd(-.22,.22)});
   divFx(x,y,ang,true);
 }
+// ★コンボ（八の字などで続けざまに囲む）のご褒美＝【回収が増える】（v146・ユーザー指示）。
+//   代金の免除は却下済み（無料が挟まると弾薬が減らず一方的になる・v107）。
+//   増やすのは供給の側にする＝「倒した相手が栄養になる量」がコンボの分だけ濃くなる。
+//   実際の発酵でも、続けざまに溶かせばそれだけ基質が一度に出る＝筋は通る。
+//   代金は据え置きなので「無料で撃てる」にはならない＝上限も付ける
+const COMBO_REFUND=+(_q.get('crefund')||0.35);   // コンボ1つごとに回収が何割増えるか
+const COMBO_MAX=+(_q.get('cmax')||2.0);          // 回収の倍率の上限
+function comboBonus(){
+  return Math.min(COMBO_MAX, 1 + COMBO_REFUND*Math.max(0, combo-1));
+}
 // 溶かした跡から乳酸菌が湧く（poly の中で溶けた位置に）
 function refundAllies(spots){
   if(REFUND<=0 || !spots.length) return 0;
-  refAcc += spots.length*REFUND;
+  refAcc += spots.length*REFUND*comboBonus();
   let n=0;
   while(refAcc>=1){
     if(livingRods()+livingFoes() >= capCount()) { refAcc=0; break; }   // 食品の容量まで
@@ -1210,6 +1220,7 @@ function refundAllies(spots){
     spawnAllyAt(s.x,s.y); n++;
     if(n>24) break;                    // 保険
   }
+  refTotal+=n;
   if(n>0 && !refundSeen){ refundSeen=true;
     tipMsg('溶けた腐敗菌は栄養になる ─ 大きく溶かすほど乳酸菌が増えて弾薬が返る'); }
   return n;
@@ -1631,10 +1642,11 @@ function doSeal(poly){
       // 輪の中心にコンボを出す
       let cx=0, cy=0; for(const q of poly){ cx+=q.x; cy+=q.y; }
       cx/=poly.length; cy/=poly.length;
-      pops.push({x:cx, y:cy, n:combo, life:1, free:false});
+      pops.push({x:cx, y:cy, n:combo, life:1,
+                 sub:'栄養 +'+Math.round((comboBonus()-1)*100)+'%'});
       comboSnd(combo);
       if(!comboSeen){ comboSeen=true;
-        tipMsg('コンボ！ 続けて決めるほど気持ちいい ─ 8の字で二つまとめて'); }
+        tipMsg('コンボ！ 続けて囲むほど栄養が濃くなる ─ 8の字で二つまとめて'); }
     }
     else if(sealed>=3) tipMsg(sealed+'匹まとめて溶かした！');
   }else{
@@ -2065,7 +2077,7 @@ const TUT=[
   { html:'白いのが<b>乳酸菌</b>、桃色が<span class="no">腐敗菌</span>。この2つが同じ場所を奪い合っているよ。上のバーが<b>今の勢力</b>。', goal:null },
   { html:'まずは<b>集める</b>。白い乳酸菌を<b>指でなぞる</b>と、数珠つなぎになって付いてくる。<b>3匹</b>つないでみよう！', goal:()=>joinedCount>=3 },
   { html:'つないだ数だけ<b>酸の帯</b>が伸びる＝<b>大きく囲める</b>。指で<b>輪を閉じて</b>、桃色の腐敗菌を<b>囲んで溶かして</b>みよう！', goal:()=>totalSealed-tutBase.sealed>=1 },
-  { html:'溶かした相手は<b>栄養</b>になって乳酸菌が増える。代金は<b>輪の大きさ＋溶かした数</b>ぶんの鎖なので、<b>2匹以上まとめて</b>囲うほど得だよ。まとめて溶かしてみよう！', goal:()=>tutBig-tutBase.big>=1 },
+  { html:'溶かした相手は<b>栄養</b>になって乳酸菌が増える。代金は<b>輪の大きさ＋溶かした数</b>ぶんの鎖なので、<b>2匹以上まとめて</b>囲うほど得だよ。<b>八の字で続けて囲む（コンボ）と栄養が濃くなる</b>。まとめて溶かしてみよう！', goal:()=>tutBig-tutBase.big>=1 },
   { html:'<b>速く走る</b>と<b>酸のオーラ</b>を纏う。触れた敵の連鎖を弾き飛ばせるけど、纏っている間は<b>拾えない・囲えない</b>。盤面を大きく<b>ひと振り</b>してみよう！', goal:()=>tutAura-tutBase.aura>=1 },
   { html:'腐敗菌に<b>触れる</b>と鎖の半分がちぎれて散る（菌は死なない）。散った<b>半透明の仲間</b>は、<b>囲えばその場で立ち直る</b>よ。', goal:null },
   { html:'桃色の<span class="no">靄＝アンモニア</span>の中では溶かせない上に、<b>腐敗菌が速く増える</b>。<b>囲うたびに中和されて縮む</b>ので早めに削り切ろう。<b>晴らした跡には乳酸菌が戻る</b>よ。', goal:null },
@@ -3242,9 +3254,9 @@ function loop(ts){
     g.strokeText('×'+o.n, o.x, y); 
     g.fillStyle= o.n>=4? '#ffe6a0' : '#bfffe0';
     g.fillText('×'+o.n, o.x, y);
-    if(o.free){ g.font='800 '+(9.5*Math.min(sc,1.5)).toFixed(1)+'px system-ui,-apple-system,sans-serif';
-      g.strokeText('鎖を使わない', o.x, y+13*sc*0.8);
-      g.fillStyle='rgba(200,255,230,.9)'; g.fillText('鎖を使わない', o.x, y+13*sc*0.8); }
+    if(o.sub){ g.font='800 '+(9.5*Math.min(sc,1.5)).toFixed(1)+'px system-ui,-apple-system,sans-serif';
+      g.strokeText(o.sub, o.x, y+13*sc*0.8);
+      g.fillStyle='rgba(200,255,230,.9)'; g.fillText(o.sub, o.x, y+13*sc*0.8); }
     g.restore();
   }
 
@@ -4011,6 +4023,7 @@ window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals
   tut:()=>({mode:tutMode,step:tutStep,met:tutGoalMet,big:tutBig,aura:tutAura}),
   tutSkip:()=>{ tutGoalMet=true; showCoach(); },
   aura:()=>aura, ammo:()=>ammo, living:()=>livingRods(), gift:()=>giftTotal,
+  refund:()=>refTotal, combo:()=>combo, cbonus:()=>comboBonus(),
   spawnAm:(x,y)=>{ ammo.push({x,y,r:AM_R*0.3,max:AM_R,t:0,life:999,ph:0}); return ammo.length; }};
 </script>
 </body>
