@@ -332,7 +332,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v152 (08-03 14:45)';
+const BUILD='v153 (08-03 15:20)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -406,7 +406,28 @@ try{
     (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
   if(!standalone) document.body.classList.add('nostandalone');
 }catch(e){}
+// ★PCの横長ウィンドウでは、盤面を【縦長のカード】にして中央に置く（Ｚと同じ考え方）。
+//   これが無いと、PCで開いた人には「縦向きにしてください」しか出ず、そのまま遊べない
+//   （実機での判断＝この作品は縦画面専用。PCでウィンドウを縦長にしろとは言えない）。
+//   マウス操作の環境だけに掛ける＝スマホ／タブレットを横に倒した時は今までどおり回転を促す。
+//   ?pcbox=0 で無効。?sim=… を付けている時はそちらが優先
+const PCBOX=(new URLSearchParams(location.search).get('pcbox')!=='0');
+function fitPcBox(){
+  if(_sim || !PCBOX) return;
+  let fine=true; try{ fine=matchMedia('(pointer:fine)').matches; }catch(e){}
+  const wide = innerWidth>innerHeight && fine;
+  const de=document.documentElement, bd=document.body;
+  if(wide){
+    const h=innerHeight, w=Math.min(innerWidth, Math.round(h*0.5625));   // 実機(375×667)と同じ比
+    de.classList.add('sim'); bd.classList.add('sim');
+    bd.style.width=w+'px'; bd.style.height=h+'px';
+  }else if(bd.classList.contains('sim')){
+    de.classList.remove('sim'); bd.classList.remove('sim');
+    bd.style.width=''; bd.style.height='';
+  }
+}
 function resize(){
+  fitPcBox();
   DPR=Math.min(2,window.devicePixelRatio||1);
   W=cv.clientWidth; H=cv.clientHeight;
   cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
