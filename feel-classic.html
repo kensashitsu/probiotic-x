@@ -294,7 +294,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v146 (08-03 10:30)';
+const BUILD='v147 (08-03 11:15)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1626,7 +1626,7 @@ function doSeal(poly){
   if(sealed>0){
     totalSealed+=sealed;
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
-    refundAllies(spots);          // 溶けた腐敗菌が栄養になって乳酸菌が増える
+    const born=refundAllies(spots);   // 溶けた腐敗菌が栄養になって乳酸菌が増える（湧いた数を表示に使う）
     updateHud();
     fizz(sealed, joinedCount);
     // ★溶かした所に乳酸の化学式を出す（アンモニアのNH₃と対になる）。
@@ -1634,7 +1634,8 @@ function doSeal(poly){
     {
       let cx=0, cy=0; for(const q of poly){ cx+=q.x; cy+=q.y; }
       cx/=poly.length; cy/=poly.length;
-      bits.push({x:cx, y:cy+16, vx:0, vy:-0.35, life:1.5, r:1, txt:'C₃H₆O₃', col:'mint', sm:1});
+      // コンボの時は「×n／乳酸菌 +n」が輪の中心に出るので、化学式はその下へ逃がす（重なると読めない）
+      bits.push({x:cx, y:cy+(combo>=2?38:16), vx:0, vy:-0.35, life:1.5, r:1, txt:'C₃H₆O₃', col:'mint', sm:1});
     }
     // ※倒した分を湧き直させない。腐敗菌は自分で増えるのが唯一の供給源なので、
     //   押し切れば本当に減っていく＝ゲージが進む
@@ -1642,11 +1643,14 @@ function doSeal(poly){
       // 輪の中心にコンボを出す
       let cx=0, cy=0; for(const q of poly){ cx+=q.x; cy+=q.y; }
       cx/=poly.length; cy/=poly.length;
+      // ★ご褒美は【何匹の乳酸菌が返ってきたか】をそのまま出す（v147）。
+      //   「栄養 +70%」は"何が得なのか分からない"（実機）＝割合は行為の結果になっていない。
+      //   湧いた匹数＝そのまま次に拾える弾薬なので、見た瞬間に得だと分かる
       pops.push({x:cx, y:cy, n:combo, life:1,
-                 sub:'栄養 +'+Math.round((comboBonus()-1)*100)+'%'});
+                 sub: born>0? '乳酸菌 +'+born : null});
       comboSnd(combo);
       if(!comboSeen){ comboSeen=true;
-        tipMsg('コンボ！ 続けて囲むほど栄養が濃くなる ─ 8の字で二つまとめて'); }
+        tipMsg('コンボ！ 続けて囲むほど乳酸菌が多く返ってくる ─ 8の字で二つまとめて'); }
     }
     else if(sealed>=3) tipMsg(sealed+'匹まとめて溶かした！');
   }else{
@@ -2077,7 +2081,7 @@ const TUT=[
   { html:'白いのが<b>乳酸菌</b>、桃色が<span class="no">腐敗菌</span>。この2つが同じ場所を奪い合っているよ。上のバーが<b>今の勢力</b>。', goal:null },
   { html:'まずは<b>集める</b>。白い乳酸菌を<b>指でなぞる</b>と、数珠つなぎになって付いてくる。<b>3匹</b>つないでみよう！', goal:()=>joinedCount>=3 },
   { html:'つないだ数だけ<b>酸の帯</b>が伸びる＝<b>大きく囲める</b>。指で<b>輪を閉じて</b>、桃色の腐敗菌を<b>囲んで溶かして</b>みよう！', goal:()=>totalSealed-tutBase.sealed>=1 },
-  { html:'溶かした相手は<b>栄養</b>になって乳酸菌が増える。代金は<b>輪の大きさ＋溶かした数</b>ぶんの鎖なので、<b>2匹以上まとめて</b>囲うほど得だよ。<b>八の字で続けて囲む（コンボ）と栄養が濃くなる</b>。まとめて溶かしてみよう！', goal:()=>tutBig-tutBase.big>=1 },
+  { html:'溶かした相手は<b>栄養</b>になって乳酸菌が増える。代金は<b>輪の大きさ＋溶かした数</b>ぶんの鎖なので、<b>2匹以上まとめて</b>囲うほど得だよ。<b>八の字で続けて囲む（コンボ）と、返ってくる乳酸菌が増える</b>。まとめて溶かしてみよう！', goal:()=>tutBig-tutBase.big>=1 },
   { html:'<b>速く走る</b>と<b>酸のオーラ</b>を纏う。触れた敵の連鎖を弾き飛ばせるけど、纏っている間は<b>拾えない・囲えない</b>。盤面を大きく<b>ひと振り</b>してみよう！', goal:()=>tutAura-tutBase.aura>=1 },
   { html:'腐敗菌に<b>触れる</b>と鎖の半分がちぎれて散る（菌は死なない）。散った<b>半透明の仲間</b>は、<b>囲えばその場で立ち直る</b>よ。', goal:null },
   { html:'桃色の<span class="no">靄＝アンモニア</span>の中では溶かせない上に、<b>腐敗菌が速く増える</b>。<b>囲うたびに中和されて縮む</b>ので早めに削り切ろう。<b>晴らした跡には乳酸菌が戻る</b>よ。', goal:null },
