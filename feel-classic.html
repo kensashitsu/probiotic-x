@@ -332,7 +332,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v150 (08-03 13:30)';
+const BUILD='v151 (08-03 14:20)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1020,6 +1020,15 @@ const GAUGE_SPD=+(_q.get('gspd')||0.5);// ゲージが追従する速さ
 const WIN_AT=+(_q.get('win')||0.94), LOSE_AT=+(_q.get('lose')||0.36);
 const ROT_HOLD=+(_q.get('rothold')||8);   // 腐り切りまでの猶予(秒)
 let rotT=0;
+// ★決着の演出（v151）＝最後の一回だけ、盤面そのものを勝敗の色で染める。
+//   このゲームの芯は「囲んだ瞬間に溶ける」＝その場で世界が変わることなので、
+//   決着も【場所の色】で見せる（テーマも「同じ場所を奪い合っている」）。
+//   勝ち＝押し合いの境目からミントが左右へ塗り広がる／負け＝縁から桃色が流れ込む。
+//   パネルはこの後に出す＝待たされるのが嫌なら ?finfx=0 で即出しに戻せる
+const FIN_FX=+(_q.get('finfx')||1);
+const FIN_T=0.95;                          // 染まり切るまで(秒)
+const FIN_PANEL=+(_q.get('finwait')||0.62);// パネルが出るまで(秒)
+let finFx={on:false, t:0, win:false, x:0};
 // ★決着画面に出す記録（v120のタイムアタックは却下したが、この内訳は残す）
 let bestCombo=0, bestChain=0;
 // ★v127：60秒に戻す（実機で「90秒は長く感じる」）。
@@ -1121,6 +1130,7 @@ function scatter(){
   cam={x:camMaxX()/2, y:camMaxY()/2}; lead={x:0,y:0}; clampCam();
   ammo=[]; amAcc=0; amSeen=false; divSeen=false; hazeSeen=false; hazeSeen2=false; emptySeen=false; burnSeen=false; ammoFlash=0; burnFx=0; grabSeen=false; rescueSeen=false; reviveSeen=false; allyHurt=0; igniteT=-9; refAcc=0; refundSeen=false; wearAcc=0; wearSeen=false; invAcc=0; invSeen=false; invFx=[]; invTotal=0; foeAlert=0; cdLast=0; bestCombo=0; bestChain=0; lunges=[]; aura=0; auraTail=0; saveSeen=false; headSpd=0; sosKilled=0; burstSeen=false; noCatchSeen=false; gauge=0.5; playT=0; phase=(firstStart?'ready':'play');
   foeAcc=0; allyAcc=0; hazeAcc=0; rotT=0; elBar.classList.remove('rot');
+  finFx.on=false; finFx.t=0;
   elOver.classList.remove('show');
   updateHud(); updateBar();
 }
@@ -1851,7 +1861,21 @@ function finishGame(win,how){
       '<div class="note" style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
       '腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</div>'+rank;
   }
-  elOver.classList.add('show');
+  // ★盤面を染める演出（v151）。染まってからパネルを出す
+  if(FIN_FX>0){
+    finFx={on:true, t:0, win:!!win, x:Math.max(0,Math.min(W, gauge*W))};
+    // 最後に一度だけ、盤面の菌が色を放つ（勝ち＝腐敗菌が溶ける／負け＝乳酸菌が沈む）
+    const src=(win? foes.filter(f=>!f.dead) : rods.filter(r=>!r.dead&&r.dying==null))
+      .filter(o=>inView(o.x,o.y,20));
+    for(let i=0;i<src.length && i<40;i++){
+      const o=src[(i*7)%src.length];
+      for(let k=0;k<3;k++) bits.push({x:o.x, y:o.y, vx:rnd(-1.2,1.2), vy:rnd(-1.6,0.3),
+        life:1.1, r:rnd(1.4,3.4), nh: win?0:1});
+    }
+    if(win) clearSnd(); else resistSnd(2);
+    setTimeout(()=>{ if(phase==='win'||phase==='lose') elOver.classList.add('show'); },
+      Math.round(FIN_PANEL*1000));
+  } else elOver.classList.add('show');
 }
 // ★鎖を後ろから使う。使った桿菌は【砕けて消える＝不可逆】。盤面に戻らないので味方の数も減る。
 //   結果、1回の封印で2匹以上溶かさないと収支がマイナスになり、
@@ -4101,6 +4125,38 @@ function loop(ts){
       if(n!==cdLast){ cdLast=n; tickSnd(n); }   // 1秒ごとに「チッ」
     } else cdLast=0;
   }
+  // ★決着＝盤面ごと勝敗の色に染める（v151）。パネルはこの後に出る
+  if(finFx.on){
+    finFx.t=Math.min(FIN_T, finFx.t+dt);
+    const e=1-Math.pow(1-finFx.t/FIN_T, 2.2);     // 0→1（最初が速い）
+    const top=PLAY_TOP, hh=Math.max(1,H-top);
+    g.save();
+    if(finFx.win){
+      // 押し合いの境目から左右へ、酸（ミント）が塗り広がる。
+      // ★全面に薄く掛けると「ただの靄」に見えたので、【塗れた範囲だけ】を染める＝広がりが見える
+      const half=30+W*e;
+      const x0=Math.max(0,finFx.x-half), x1=Math.min(W,finFx.x+half);
+      if(x1>x0){ g.fillStyle='rgba(143,240,192,0.26)'; g.fillRect(x0,top,x1-x0,hh); }
+      const edge=(cx)=>{
+        if(cx<-40||cx>W+40) return;
+        const gg=g.createLinearGradient(cx-30,0,cx+30,0);
+        gg.addColorStop(0,'rgba(200,255,232,0)');
+        gg.addColorStop(0.5,'rgba(216,255,238,'+(0.60*(1-e))+')');
+        gg.addColorStop(1,'rgba(200,255,232,0)');
+        g.fillStyle=gg; g.fillRect(cx-30,top,60,hh);
+      };
+      edge(finFx.x-half); edge(finFx.x+half);
+    }else{
+      // 縁から中心へ、腐敗（桃色）が流れ込む
+      g.fillStyle='rgba(214,92,150,'+(0.22*e)+')'; g.fillRect(0,top,W,hh);
+      const cy=top+hh/2, R=Math.hypot(W,hh)*0.62*(1-e);
+      const gr=g.createRadialGradient(W/2,cy,Math.max(0,R-30),W/2,cy,Math.max(2,R+80));
+      gr.addColorStop(0,'rgba(232,138,176,0)');
+      gr.addColorStop(1,'rgba(226,110,165,'+(0.52-0.18*e)+')');
+      g.fillStyle=gr; g.fillRect(0,top,W,hh);
+    }
+    g.restore();
+  }
   // ?dbg=1 で状態を画面に出す（実機で原因を特定するため）。
   // ※バージョン表示(左下)を3回続けてタップしても出せる＝URLを打ち直さなくて良い
   if(dbgOn){
@@ -4130,7 +4186,7 @@ window.__dbg={foes:()=>foes,rods:()=>rods,joined:()=>joinedCount,seals:()=>seals
   tut:()=>({mode:tutMode,step:tutStep,met:tutGoalMet,big:tutBig,aura:tutAura}),
   tutSkip:()=>{ tutGoalMet=true; showCoach(); },
   aura:()=>aura, ammo:()=>ammo, living:()=>livingRods(), gift:()=>giftTotal,
-  refund:()=>refTotal, combo:()=>combo, cbonus:()=>comboBonus(),
+  refund:()=>refTotal, combo:()=>combo, cbonus:()=>comboBonus(), fin:()=>finFx,
   spawnAm:(x,y)=>{ ammo.push({x,y,r:AM_R*0.3,max:AM_R,t:0,life:999,ph:0}); return ammo.length; }};
 </script>
 </body>
