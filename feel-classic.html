@@ -71,7 +71,9 @@
   #nums .s2.inv{transform:scale(1.14)}
   /* ★残り時間は試合そのものなので、行の真ん中に置いて他の数字より大きく出す。
      左右のグループを同じ重み（flex:1）にすると、中身の幅が変わっても中央がずれない */
-  #nums .grp{flex:1;display:flex;align-items:center;gap:9px;min-width:0}
+  /* ★min-width:0 だけでは中身（nowrap）が縮まないので、3桁になると時間の下へ潜り込んで重なっていた（実機）。
+     overflow:hidden を付けて【絶対に重ならない】ようにし、その上で幅が足りるよう詰める */
+  #nums .grp{flex:1;display:flex;align-items:center;gap:9px;min-width:0;overflow:hidden}
   #nums .gR{justify-content:flex-end}
   #nums .tm{flex:0 0 auto;padding:1px 13px;border-radius:999px;
     background:rgba(200,245,225,.07);border:1px solid rgba(190,240,215,.22);
@@ -92,10 +94,13 @@
   #sndbtn.wait{opacity:.55}
   body.short #sndbtn{font-size:11px;padding:3px 7px}
   /* 決着 */
-  #over{position:absolute;left:24px;right:24px;top:30%;z-index:9;text-align:center;
-    background:rgba(7,12,15,.93);border:1px solid #26343c;border-radius:18px;padding:24px 18px;
-    /* 記録の5行を足したぶん、狭い画面でははみ出すのでここだけ縦に送れるようにする */
-    max-height:calc(100% - 56px);overflow-y:auto;display:none}
+  /* ★上端を割合(30%)で置いていたため、記録が5行そろうと下のボタンが画面から切れていた（実機）。
+     高さは中身で変わるので、位置は【上下の中央】で決める＝中身が増減しても釣り合う */
+  #over{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);
+    z-index:9;text-align:center;
+    background:rgba(7,12,15,.93);border:1px solid #26343c;border-radius:18px;padding:22px 18px;
+    /* それでも足りない時のために、ここだけ縦に送れるようにしておく */
+    max-height:calc(100% - 28px);overflow-y:auto;display:none}
   #over.show{display:block}
   /* タイトル：ブラウザは最初の操作まで音を鳴らせないので、その一手を兼ねる。
      試合の90秒もここから始まる（開いた瞬間から減っていたのを修正） */
@@ -157,7 +162,6 @@
     100%{transform:translateY(0) rotate(0);opacity:1}}
   /* ★横画面は決着パネルが元から画面に収まっていない（実測：絵なしでも 324px 対 枠317px）ので、
      背の低い画面では絵を出さない。文字と記録を読ませる方を優先する */
-  @media (max-height:420px){ #over .art{display:none} }
   #over .ttl{font-size:27px;font-weight:800;letter-spacing:.04em}
   #over .sub{font-size:13px;color:#9fb3ac;margin-top:10px;line-height:1.9}
   /* ★2つのボタンは同じ大きさに（v137と同じ考え方＝幅は中身ではなく半分ずつで決める） */
@@ -201,7 +205,7 @@
     #ready .rt{font-size:24px;margin-top:8px} #ready .rs{font-size:12px;margin-top:9px;line-height:1.7}
     #ready .mascot{width:104px} #ready .rsub{font-size:11.5px;margin-top:4px} #ready .btns{margin-top:14px}
     #ready .btns{margin-top:15px} #go,#howto{padding:11px 10px} #ready .rn{margin-top:10px}
-    #over{top:14%;left:15%;right:15%;padding:18px}
+    #over{left:15%;right:15%;padding:16px 18px}
   }
   /* ★アドレスバーが出ている横画面（高さ340px未満）は、HUDをさらに薄くして盤面に高さを回す */
   body.short #hud{top:calc(env(safe-area-inset-top) + 4px)}
@@ -222,9 +226,29 @@
   /* ★縦画面は幅375pxしかないので、HUDの1行が折り返してしまう（🔊ボタンを足した分）。
      折り返さないよう詰め、累計の「溶かした」だけ省く（決着画面で出るので live では不要） */
   @media (orientation:portrait){
-    #nums{gap:8px}
-    #nums .grp{gap:8px}
+    #nums{gap:6px}
+    #nums .grp{gap:6px}
     #nums *{white-space:nowrap}
+  }
+  /* ★幅375pxで、両陣営が3桁＋鎖2桁になると入り切らない（実機で「鎖」が時間に重なった）。
+     ラベルだけ小さくして数字は据え置き＝読む物は変えずに幅だけ作る */
+  @media (max-width:400px){
+    #nums{font-size:10px}
+    #nums .tm{padding:1px 10px}
+  }
+  /* ★背の低い画面（横持ち）は、絵とひとこと説明を落として記録とボタンを収める。
+     記録は「今回」が何位に入るか分からないので【行を減らさず、行間だけ詰める】。
+     ※このブロックは他の #over 指定より【後】に置くこと（同じ強さなので後勝ち。
+       前に置いていた時は base の .sub/.obtns に負けて一切効いていなかった） */
+  @media (max-height:420px){
+    #over{padding:14px 16px}
+    #over .art{display:none}
+    #over .note{display:none}
+    #over .rk{line-height:1.45}
+    #over .ttl{font-size:23px}
+    #over .sub{margin-top:6px;line-height:1.65;font-size:12px}
+    #over .obtns{margin-top:10px}
+    #again,#quit{padding:8px 12px}
   }
   /* ホーム画面に追加すればバーごと消える。スタンドアロン起動中は出さない */
   #a2hs{display:none} body.nostandalone #a2hs{display:block}
@@ -308,7 +332,7 @@
 <script>
 'use strict';
 // 公開ごとに stamp.py が書き換える。画面左下に出して、更新されたか一目で分かるようにする
-const BUILD='v149 (08-03 12:40)';
+const BUILD='v150 (08-03 13:30)';
 try{
   const ve=document.getElementById('ver');
   ve.textContent=BUILD;
@@ -1717,7 +1741,7 @@ function rankHtml(top, me){
       + 'margin-bottom:5px;text-align:center">この端末の記録　上位5</div>';
   top.forEach((r,i)=>{
     const mine=(i===me);
-    h+='<div style="display:flex;align-items:baseline;gap:9px;line-height:1.95;'
+    h+='<div class="rk" style="display:flex;align-items:baseline;gap:9px;line-height:1.95;'
       +'font-variant-numeric:tabular-nums'+(mine?';color:#dff7ec;font-weight:800':'')+'">'
       +'<span style="width:14px;color:'+(mine?'#8ff0c0':'#5f7078')+'">'+(i+1)+'</span>'
       +'<span style="width:58px;color:'+(mine?'#8ff0c0':'#bfe9d2')+'">'+pcTxt(r.pc)+'%</span>'
@@ -1816,7 +1840,7 @@ function finishGame(win,how){
     elOverT.textContent = how==='ko'? '完封！' : '発酵で押し勝った！';
     elOverT.style.color='#8ff0c0';
     elOverS.innerHTML=ratio+st('#8ff0c0')+
-      '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
+      '<div class="note" style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
       (how==='ko'? '腐敗菌を抑え切った。酸が行き渡った場所は、もう腐敗に傾きません。'
                  : '乳酸菌が多いまま守り切った＝発酵の勝ち。')+'</div>'+rank;
     if(totalSealed>best){ best=totalSealed; localStorage.setItem('sealBest',best); }
@@ -1824,7 +1848,7 @@ function finishGame(win,how){
     elOverT.textContent = how==='ko'? '腐ってしまった…' : '腐敗に押し負けた…';
     elOverT.style.color='#ff9a80';
     elOverS.innerHTML=ratio+st('#ffb9a6')+
-      '<div style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
+      '<div class="note" style="margin-top:8px;color:#6f7d84;font-size:11.5px">'+
       '腐敗菌は増えるたびに乳酸菌の居場所を奪います。囲んで数を減らすのが唯一の手。</div>'+rank;
   }
   elOver.classList.add('show');
