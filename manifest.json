@@ -1,7 +1,7 @@
 {
-  "name": "プロバイオティＸ ─ ぬか床を守れ",
+  "name": "プロバイオティＸ ─ 発酵か、腐敗か",
   "short_name": "プロバイオティＸ",
-  "start_url": "feel-classic.html",
+  "start_url": "./",
   "scope": ".",
   "display": "fullscreen",
   "orientation": "portrait",
